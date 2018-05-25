@@ -1,0 +1,17 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="program.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\core\YoloDev.GitVersion.Core\YoloDev.GitVersion.Core.fsproj" />
+    <ProjectReference Include="..\..\..\src\core\YoloDev.GitVersion.Core.Node\YoloDev.GitVersion.Core.Node.fsproj" />
+    <ProjectReference Include="..\..\common\YoloDev.GitVersion.Common.TestCase\YoloDev.GitVersion.Common.TestCase.fsproj" />
+  </ItemGroup>
+
+</Project>

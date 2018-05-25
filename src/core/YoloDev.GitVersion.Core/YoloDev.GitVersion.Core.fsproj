@@ -1,0 +1,18 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="semver.fs" />
+    <Compile Include="helpers.fs" />
+    <Compile Include="operators.fs" />
+    <Compile Include="types.fs" />
+    <Compile Include="version.fs" />
+    <Compile Include="single.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\YoloDev.GitVersion.Core.Abstractions\YoloDev.GitVersion.Core.Abstractions.fsproj" />
+  </ItemGroup>
+  <Import Project="..\..\..\.paket\Paket.Restore.targets" />
+</Project>

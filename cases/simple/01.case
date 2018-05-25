@@ -1,0 +1,15 @@
+#simple
+expect 0.1.0-ci.0
+commit
+expect 0.1.0-ci.1
+commit
+expect 0.1.0-ci.2
+release
+expect 0.1.0
+commit
+commit
+expect 0.1.1-ci.2
+commit "Semver: minor"
+expect 0.2.0-ci.3
+commit "Semver: major"
+expect 1.0.0-ci.4

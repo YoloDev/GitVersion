@@ -1,0 +1,14 @@
+{
+  "name": "@yolodev/gitversion",
+  "private": true,
+  "version": "0.0.0",
+  "devDependencies": {
+    "babel-core": "^6.26.3",
+    "fable-utils": "^1.0.6",
+    "rollup-plugin-fable": "^1.1.1",
+    "rollup-plugin-prettier": "^0.4.0"
+  },
+  "dependencies": {
+    "nodegit": "^0.22.0"
+  }
+}

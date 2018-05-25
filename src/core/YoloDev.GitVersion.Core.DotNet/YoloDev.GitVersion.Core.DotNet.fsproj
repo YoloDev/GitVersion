@@ -1,0 +1,15 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="types.fs" />
+    <Compile Include="run.fs" />
+    <Compile Include="testHelpers.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\YoloDev.GitVersion.Core.Abstractions\YoloDev.GitVersion.Core.Abstractions.fsproj" />
+  </ItemGroup>
+  <Import Project="..\..\..\.paket\Paket.Restore.targets" />
+</Project>
