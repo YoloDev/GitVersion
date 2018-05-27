@@ -15,7 +15,7 @@ open System.Security.Cryptography
 [<AutoOpen>]
 module internal Helpers =
 
-  let inline dispose (d: #IDisposable) = d.Dispose ()
+  let dispose (d: #IDisposable) = d.Dispose ()
 
   let nullArg (name: string) = failwithf "Argument %s cannot be null" name
 
@@ -28,11 +28,19 @@ module internal Helpers =
   [<Emit("debugger;")>]
   let debugger () : unit = jsNative
 
-  let inline debuggerF f v = debugger (); f v
+  [<Emit("(($0 && $0.errno) | 0) || 0")>]
+  let __errorCode (_e: #exn) : int = jsNative
+
+  let (|NodeError|_|) (no: NodeGit.ErrorCode) (e: #exn) =
+    match __errorCode e with
+    | n when n = int no -> Some NodeError
+    | _                 -> None
 
   [<RequireQualifiedAccess>]
   module Promise =
     let unit x = Promise.lift x
+
+    let fail e : JS.Promise<_> = promise { return raise e }
 
     let defer<'t> () =
       let mutable resolve = Unchecked.defaultof<_>
@@ -43,6 +51,11 @@ module internal Helpers =
         ())
 
       promise, resolve, reject
+    
+    let safeLookup p = p |> Promise.catchBind (fun e ->
+      match e with
+      | NodeError NodeGit.ErrorCode.NotFound -> Promise.unit None
+      | _                                    -> Promise.fail e)
 
   [<RequireQualifiedAccess>]
   module IO =
@@ -50,11 +63,6 @@ module internal Helpers =
       f ()
       |> Promise.eitherEnd (Ok >> cont >> ignore) (Error >> cont >> ignore)
       FakeUnit
-    
-    let debug io = IO <| fun sys cont ->
-      IO.fork io sys <| fun r ->
-        debugger ()
-        cont r
   
   // Note, this code get's compiled to JS, so this completely
   // ignores thread safety
@@ -110,16 +118,37 @@ let HEX_SIZE = 40
 
 let n = NodeGit.nodegit
 
+[<RequireQualifiedAccess>]
+type LookupOptions =
+  | None = 0
+  | ThrowWhenNoGitObjectHasBeenFound = 1
+  | DereferenceResultToCommit = 2
+  | ThrowWhenCanNotBeDereferencedToACommit = 4
+  
+[<RequireQualifiedAccess>]
+module LookupOptions =
+
+  let private hasFlag (f: LookupOptions) (l: LookupOptions) =
+    (l &&& f) = f
+
+  let throwWenNoGitObjectHasBeenFound = hasFlag LookupOptions.ThrowWhenNoGitObjectHasBeenFound
+  let dereferenceResultToCommit = hasFlag LookupOptions.DereferenceResultToCommit
+  let throwWhenCanNotBeDereferencedToACommit = hasFlag LookupOptions.ThrowWhenCanNotBeDereferencedToACommit
+
 type ObjectType =
+  | Any
   | Commit
   | Tree
   | Blob
   | Tag
 
+[<RequireQualifiedAccess>]
+
 module ObjectType =
   
   let toInt o =
     match o with
+    | Any    -> -2
     | Commit -> 1
     | Tree   -> 2
     | Blob   -> 3
@@ -127,6 +156,7 @@ module ObjectType =
   
   let toNodeGit o =
     match o with
+    | Any    -> NodeGit.ObjectType.ANY
     | Commit -> NodeGit.ObjectType.COMMIT
     | Tree   -> NodeGit.ObjectType.TREE
     | Blob   -> NodeGit.ObjectType.BLOB
@@ -134,6 +164,7 @@ module ObjectType =
   
   let ofInt i =
     match i with
+    | -2 -> ObjectType.Any 
     | 1 -> ObjectType.Commit
     | 2 -> ObjectType.Tree
     | 3 -> ObjectType.Blob
@@ -143,22 +174,12 @@ module ObjectType =
   let ofType t =
     if   t = typeof<Commit> then ObjectType.Commit
     elif t = typeof<Tag> then ObjectType.Tag
-    else failwith "Not implemented"
-
-/// <summary>
-/// A Repository is the primary interface into a git repository
-/// </summary>
-type IRepository =
-  inherit IDisposable
-
-  abstract Lookup: ObjectId -> IO<GitObject option>
-  abstract Lookup: string -> IO<GitObject option>
-  abstract Lookup: ObjectId * ObjectType -> IO<GitObject option>
-  abstract Lookup: string * ObjectType -> IO<GitObject option>
+    elif t = typeof<GitObject> then ObjectType.Any
+    else debugger (); failwith "Not implemented"
 
 [<AutoOpen>]
 module RepositoryExtensions =
-  let inline private allowOrphanReference (repo: Repository) (identifier: string) =
+  let private allowOrphanReference (repo: Repository) (identifier: string) =
     if identifier = "HEAD"
     then IO.unit true
     else 
@@ -167,33 +188,22 @@ module RepositoryExtensions =
 
   type Repository with
     member r.Lookup<'t when 't :> GitObject> (objectish: string, t: System.Type) : IO<'t option> =
-      (r :> IRepository).Lookup (objectish, ObjectType.ofType t)
-      |> IO.map (Option.map (fun o -> o :?> 't))
+      r.Lookup (objectish, ObjectType.ofType t)
+      |> IO.map (Option.map (fun (o: GitObject) -> o :?> 't))
 
     member r.Lookup<'t when 't :> GitObject> (id: ObjectId, t: System.Type) : IO<'t option> =
-      (r :> IRepository).Lookup (id, ObjectType.ofType t)
-      |> IO.map (Option.map (fun o -> o :?> 't))
+      r.Lookup (id, ObjectType.ofType t)
+      |> IO.map (Option.map (fun (o: GitObject) -> o :?> 't))
 
     member r.DereferenceToCommit (identifier: string) =
       allowOrphanReference r identifier
       |> IO.bind (fun allowOrphan ->
-        IO.ofPromiseFactory (fun () -> 
-          promise {
-            try
-              debugger ()
-              let! obj = NodeGit.nodegit.Object.lookupS r.Repo identifier NodeGit.ObjectType.ANY
-              debugger ()
-              let! commit = obj.peel NodeGit.ObjectType.COMMIT
-              debugger ()
-              if isNull commit
-              then return None
-              else return commit.id () |> ObjectId |> Some
-            with | _ -> return None
-          }) 
-        |> IO.tap (debuggerF (function 
-                                | None when not allowOrphan -> failwithf "Commit with identifier '%s' not found" identifier 
-                                | _ -> ())))
-
+        let options =
+          if not allowOrphan
+          then LookupOptions.DereferenceResultToCommit ||| LookupOptions.ThrowWhenNoGitObjectHasBeenFound
+          else LookupOptions.DereferenceResultToCommit
+        r.Lookup (identifier, ObjectType.Any, options))
+      |> IO.map (Option.map (fun o -> o.Id))
     
     member r.SingleCommittish (identifier: obj) =
       match identifier with
@@ -235,7 +245,7 @@ type IBelongToARepository =
   /// The returned value should not be disposed.
   /// </para>
   /// </summary>
-  abstract Repository: IRepository
+  abstract Repository: Repository
 
 /// <summary>
 /// Uniquely identifies a <see cref="GitObject"/>.
@@ -329,11 +339,13 @@ type GitObject internal (repo: Repository, oid: ObjectId) =
         o.free ()
         p)
       |> Promise.map (fun o ->
-        let oid = ObjectId (o.id ())
-        o.free ()
-        oid))
-    |> IO.bind (fun id -> repo.Lookup<'t> (id, t))
-    |> IO.map Option.get
+        match o with
+        | None -> None
+        | Some o ->
+          let oid = ObjectId (o.id ())
+          o.free ()
+          Some oid))
+    |> IO.bind (function | None -> IO.unit None | Some id -> repo.Lookup<'t> (id, t))
   
   interface IEquatable<GitObject> with
     member o.Equals other =
@@ -341,7 +353,7 @@ type GitObject internal (repo: Repository, oid: ObjectId) =
       && o.Id = other.Id
   
   interface IBelongToARepository with
-    member o.Repository = repo :> IRepository
+    member o.Repository = repo
   
   abstract Dispose: unit -> unit
 
@@ -354,6 +366,7 @@ type Repository internal (repo: NodeGit.Repository) as this =
   let refs = ReferenceCollection this
   let tags = TagCollection this
   let commits = QueryableCommitLog this
+  let index = Index this
 
   let toImpl (repo: Repository) (oid: ObjectId option) = 
     Promise.map <| fun (o: NodeGit.GitObject) ->
@@ -387,41 +400,84 @@ type Repository internal (repo: NodeGit.Repository) as this =
     |> IO.map Option.get
   
   member r.ApplyTag (name: string) =
-    r.Head
-    |> IO.bind (fun h -> h.Tip)
-    |> IO.map (function | None -> failwith "Head has no commits" | Some t -> t)
-    |> IO.bind (fun c ->
-      IO.ofPromiseFactory (fun () -> repo.createLightweightTag c.Id.Oid name))
-    |> IO.bind (fun ref ->
-      r.Tags.Get (ref.name ())
-      |> IO.tryFinally (fun () -> ref.free ()))
-    |> IO.map Option.get
+    io {
+      let! head = r.Head
+
+      let! tip = head.Tip
+
+      match tip with
+      | None -> return failwith "Head has no commits"
+      | Some commit ->
+        printfn "Apply tag with name '%s' to commit '%s'" name commit.Sha
+        let! ref = IO.ofPromiseFactory (fun () -> repo.createLightweightTag commit.Id.Oid name)
+
+        let name = ref.name ()
+        
+        let! tag = r.Tags.Get name
+        return Option.get tag
+    }
 
   member internal __.Repo = repo
+  
+  member r.Lookup (oid: ObjectId): IO<GitObject option> =
+    r.Lookup (oid, ObjectType.Any)
+  
+  member r.Lookup (objectish: string): IO<GitObject option> =
+    r.Lookup (objectish, ObjectType.Any)
+  
+  member r.Lookup (oid: ObjectId, gitType: ObjectType): IO<GitObject option> =
+    IO.ofPromiseFactory <| fun () ->
+      n.Object.lookup repo oid.Oid (ObjectType.toNodeGit gitType)
+      |> toImpl r (Some oid)
+  
+  member r.Lookup (objectish: string, gitType: ObjectType): IO<GitObject option> =
+    r.Lookup (objectish, gitType, LookupOptions.None)
 
+  // TODO: Add LookUpOptions
+  member r.Lookup (objectish: string, gitType: ObjectType, options: LookupOptions): IO<GitObject option> =
+    IO.ofPromiseFactory <| fun () ->
+      promise {
+        let! objOpt = NodeGit.nodegit.Revparse.single r.Repo objectish |> Promise.safeLookup
+          
+        match objOpt with
+        | None ->
+          if LookupOptions.throwWenNoGitObjectHasBeenFound options
+          then return failwithf "No git object was found with name '%s'" objectish
+          else return None
+        | Some obj ->
+          let objType = obj.``type`` ()
+          if gitType <> ObjectType.Any && ObjectType.toNodeGit gitType <> objType
+          then
+            if LookupOptions.throwWenNoGitObjectHasBeenFound options
+            then return failwithf "No git object was found with name '%s'" objectish
+            else return None
+          else
+            let! objOpt =
+              if LookupOptions.dereferenceResultToCommit options
+              then obj.peel NodeGit.ObjectType.COMMIT |> Promise.safeLookup
+              else Promise.unit (Some obj)
+            
+            match objOpt with
+            | None ->
+              if LookupOptions.throwWhenCanNotBeDereferencedToACommit options
+              then return failwithf "Could not dereference to commit: '%s'" objectish
+              else return None
+            | Some o -> return! toImpl r None (Promise.unit o)
+      }
+    
+    member internal __.ReloadFromDisk () =
+      index.Read ()
+    
+    member r.RetrieveStatus (options: StatusOptions option) =
+      io {
+        do! r.ReloadFromDisk ()
+
+        return RepositoryStatus (r, options)
+      }
+    
+  
   interface IDisposable with
     member __.Dispose () = repo.free ()
-  
-  interface IRepository with
-    member r.Lookup (oid: ObjectId) =
-      IO.ofPromiseFactory <| fun () ->
-        n.Object.lookup repo oid.Oid NodeGit.ObjectType.ANY
-        |> toImpl r (Some oid)
-    
-    member r.Lookup (objectish: string) =
-      IO.ofPromiseFactory <| fun () ->
-        n.Object.lookupS repo objectish NodeGit.ObjectType.ANY
-        |> toImpl r None
-    
-    member r.Lookup (oid: ObjectId, gitType: ObjectType) =
-      IO.ofPromiseFactory <| fun () ->
-        n.Object.lookup repo oid.Oid (ObjectType.toNodeGit gitType)
-        |> toImpl r (Some oid)
-    
-    member r.Lookup (objectish: string, gitType: ObjectType) =
-      IO.ofPromiseFactory <| fun () ->
-        n.Object.lookupS repo objectish (ObjectType.toNodeGit gitType)
-        |> toImpl r None
 
 [<AbstractClass>]
 type LazyGitObject<'t> internal (repo: Repository, id: ObjectId, factory: NodeGit.Repository -> NodeGit.Oid -> JS.Promise<'t option>, free: 't -> unit) =
@@ -452,7 +508,7 @@ type TagAnnotation internal (repo: Repository, id: ObjectId) =
     x.Inst
     |> IO.bind (fun t ->
       let oid = ObjectId (t.targetId ())
-      (repo :> IRepository).Lookup oid)
+      repo.Lookup oid)
     |> IO.map Option.get
 
 [<AbstractClass>]
@@ -481,7 +537,7 @@ type Reference internal (repo: Repository, canonicalName: string, targetIdentifi
       && string o = string other
 
   interface IBelongToARepository with
-    member __.Repository = repo :> IRepository
+    member __.Repository = repo
 
 [<RequireQualifiedAccess>]
 module Reference =
@@ -539,7 +595,7 @@ type DirectReference internal (repo: Repository, canonicalName: string, targetId
   member __.Id = targetId
 
   member __.Target: IO<GitObject option> =
-    (repo :> IRepository).Lookup targetId
+    repo.Lookup targetId
 
 type SymbolicReference internal (repo: Repository, canonicalName: string, targetIdentifier: string, target: Reference option) =
   inherit Reference (repo, canonicalName, targetIdentifier)
@@ -620,54 +676,42 @@ type QueryableCommitLog internal (repo: Repository, filter: ICommitFilter) =
   member __.Get (id: ObjectId) = repo.Lookup<Commit> (id, typeof<Commit>)
 
   member internal __.ToSeq () =
-    IOSeq.delay <| fun () ->
-      debugger ()
+    ioSeq {
       let revwalk = NodeGit.nodegit.Revwalk.create repo.Repo
-
-      let pushIO =
-        filter.IncludeReachableFrom
-        |> IOSeq.ofSeq
-        |> IOSeq.chooseM (debuggerF repo.SingleCommittish)
-        |> IO.map (Seq.iter (fun oid -> debugger (); revwalk.push oid.Oid))
-      
-      let hideIO =
-        filter.ExcludeReachableFrom
-        |> IOSeq.ofSeq
-        |> IOSeq.chooseM repo.SingleCommittish
-        |> IO.map (Seq.iter (fun oid -> debugger (); revwalk.push oid.Oid))
-      
-      let prepareIO =
-        IO.combine pushIO hideIO
-        |> IO.tap (fun () -> debugger (); if filter.FirstParentOnly then revwalk.simplifyFirstParent ())
-
-      // Important: this IO is not cached, as such, every time it get's called it will progress
-      // the revwalk, which makes the `takeWhile` bellow work.
-      let next =
-        IO.ofPromiseFactory (debuggerF revwalk.next)
-        |> IO.map Option.ofObj
-        |> IO.bind (function | None -> IO.unit None | Some oid -> repo.Lookup<Commit> (ObjectId oid, typeof<Commit>))
-        |> IOSeq.ofIO
-      
-      // TODO: This fails when no commits are present. Probably needs special case :-/
-      IOSeq.takeWhile Option.isSome next
-      |> IOSeq.map Option.get
-      |> IOSeq.doFirst prepareIO
-      |> IOSeq.tryFinally revwalk.free
-    (* ioSeq {
-      let revwalk = NodeGit.nodegit.Revwalk.create repo.Repo
-      let next = IO.ofPromiseFactory revwalk.next
       try
-        let mutable isDone = false
-        while not isDone do
-          let! oid = next
-          if isNull oid
-          then isDone <- true
-          else
-            let! commit = repo.Lookup<Commit> (ObjectId oid)
-            yield Option.get commit
+        for inc in filter.IncludeReachableFrom do
+          let! optId = repo.SingleCommittish inc
+          match optId with
+          | None -> ()
+          | Some id -> 
+            revwalk.push id.Oid
+        
+        for inc in filter.ExcludeReachableFrom do
+          let! optId = repo.SingleCommittish inc
+          match optId with
+          | None -> ()
+          | Some id -> 
+            revwalk.hide id.Oid
+        
+        if filter.FirstParentOnly then
+          revwalk.simplifyFirstParent ()
+        
+        try
+          let mutable atEnd = false
+          while not atEnd do
+            let! oid = IO.ofPromiseFactory revwalk.next
+
+            if isNull oid 
+            then atEnd <- true
+            else
+              let! commit = repo.Lookup<Commit> (ObjectId oid, typeof<Commit>)
+              yield Option.get commit
+        with
+        | NodeError NodeGit.ErrorCode.IterOver -> ()
+        | e                                    -> raise e
       finally
         revwalk.free ()
-    } *)
+    }
 
 type ReferenceCollection internal (repo: Repository) =
 
@@ -694,14 +738,123 @@ type TagCollection internal (repo: Repository) =
       | Reference.TagLikeRefName t    -> t
       | s                             -> s
     
-    repo.Refs.Resolve refName
-    |> IO.map (function | None -> None | Some ref -> new Tag (repo, ref, refName) |> Some)
+    let canonicalName = Reference.tagPrefix + refName 
+    repo.Refs.Resolve canonicalName
+    |> IO.map (function | None -> None | Some ref -> new Tag (repo, ref, canonicalName) |> Some)
   
-  member tags.Seq (*: IOSeq<Tag>*) =
-    IO.ofPromiseFactory (fun () -> NodeGit.nodegit.Tag.list repo.Repo)
-    |> IO.map IOSeq.ofSeq
-    |> IOSeq.bindIO id
-    |> IOSeq.chooseM tags.Get
+  member tags.Seq =
+    ioSeq {
+      let! tagNames = IO.ofPromiseFactory (fun () -> NodeGit.nodegit.Tag.list repo.Repo)
+
+      for tagName in tagNames do
+        let! tag = tags.Get tagName
+        yield Option.get tag
+    }
+
+type Index internal (repo: Repository) =
+  let _ref = new LazyGitRef<NodeGit.Index> (IO.ofPromiseFactory repo.Repo.index |> IO.map Some, ignore)
+
+  member private __.Ref =
+    LazyGitRef.get _ref
+    |> IO.map Option.get
+
+  member i.Read () =
+    i.Ref
+    |> IO.bind (fun i -> IO.ofPromiseFactory (fun () -> i.read true))
+    |> IO.map ignore
+
+type RepositoryStatus internal (repo: Repository, options: StatusOptions option) =
+
+  let createStatusOptions (options: StatusOptions) =
+    let coreOptions = NodeGit.nodegit.StatusOptions.create ()
+    coreOptions.version <- 1
+    coreOptions.show <- enum (int options.show)
+
+    let addFlag b f =
+      if b then coreOptions.flags <- coreOptions.flags ||| f
+
+    addFlag options.includeIgnored GitStatusOptionFlags.IncludeIgnored
+    addFlag options.includeUntracked GitStatusOptionFlags.IncludeUntracked
+    addFlag options.detectRenamesInIndex (GitStatusOptionFlags.RenamesHeadToIndex ||| GitStatusOptionFlags.RenamesFromRewrites)
+    addFlag options.detectRenamesInWorkDir (GitStatusOptionFlags.RenamesIndexToWorkDir ||| GitStatusOptionFlags.RenamesFromRewrites)
+    addFlag options.excludeSubmodules GitStatusOptionFlags.ExcludeSubmodules
+    addFlag options.recurseIgnoredDirs GitStatusOptionFlags.RecurseIgnoredDirs
+    addFlag options.recurseUntrackedDirs GitStatusOptionFlags.RecurseUntrackedDirs
+    addFlag options.disablePathSpecMatch GitStatusOptionFlags.DisablePathspecMatch
+    addFlag options.includeUnaltered GitStatusOptionFlags.IncludeUnmodified
+
+    match options.pathSpec with
+    | None   -> ()
+    | Some l -> coreOptions.pathspec <- Array.ofList l
+
+    coreOptions
+  
+  let statusEntryForDelta (gitStatus: FileStatus) (deltaHeadToIndex: DiffDelta option) (deltaIndexToWorkDir: DiffDelta option) =
+    let headToIndexRenameDetails =
+      match deltaHeadToIndex with
+      | Some delta when FileStatus.has FileStatus.RenamedInIndex gitStatus ->
+        Some <| RenameDetails.ofDelta delta
+      | _ -> None
+    let indexToWorkDirRenameDetails =
+      match deltaIndexToWorkDir with
+      | Some delta when FileStatus.has FileStatus.RenamedInWorkdir gitStatus ->
+        Some <| RenameDetails.ofDelta delta
+      | _ -> None
+
+    let filePath =
+      deltaIndexToWorkDir
+      |> Option.map (fun delta -> delta.newFile.path ())
+      |> Option.orElseWith (fun () -> 
+        deltaHeadToIndex
+        |> Option.map (fun delta -> delta.newFile.path ()))
+      |> Option.defaultWith (fun () -> failwithf "Neither of the deltas are avail")
+    
+    { StatusEntry.filePath = filePath
+      state = gitStatus
+      headToIndexRenameDetails = headToIndexRenameDetails
+      indexToWorkDirRenameDetails = indexToWorkDirRenameDetails }
+  
+  let _entries =
+    IO.ofPromiseFactory (fun () ->
+      promise {
+        let opts = createStatusOptions (options |> Option.defaultValue StatusOptions.defaultOptions)
+        let! list = NodeGit.nodegit.StatusList.create repo.Repo opts
+        try return List.ofSeq <|
+              seq {
+                for i in 0 .. list.entrycount () - 1 do
+                  let entry = NodeGit.nodegit.Status.byIndex list i
+                  yield statusEntryForDelta (enum entry.status) entry.headToIndex entry.indexToWorkdir
+              }
+        finally
+          list.free ()
+      })
+    |> IO.cache
+  
+  member __.IsDirty =
+    _entries
+    |> IO.map (Seq.exists StatusEntry.isDirty)
+
+type RenameDetails =
+  { oldFilePath: string
+    newFilePath: string
+    similarity: int }
+
+module RenameDetails =
+
+  let ofDelta (delta: DiffDelta) =
+    { oldFilePath = delta.oldFile.path ()
+      newFilePath = delta.newFile.path ()
+      similarity = delta.similarity }
+
+type StatusEntry =
+  { filePath: string
+    state: FileStatus
+    headToIndexRenameDetails: RenameDetails option
+    indexToWorkDirRenameDetails: RenameDetails option }
+
+module StatusEntry =
+  let isDirty entry =
+    entry.state <> FileStatus.Ignored && entry.state <> FileStatus.Unaltered 
 
 type Signature = 
   { name: string
@@ -725,3 +878,192 @@ module CommitOptions =
       allowEmptyCommit = false
       prettifyMessage = true
       commentaryChar = None }
+
+/// <summary>
+/// Flags controlling what files are reported by status.
+/// </summary>
+[<RequireQualifiedAccess>]
+type StatusShowOption =
+  /// <summary>
+  /// Both the index and working directory are examined for changes
+  /// </summary>
+  | IndexAndWorkDir = 0
+
+  /// <summary>
+  /// Only the index is examined for changes
+  /// </summary>
+  | IndexOnly = 1
+
+  /// <summary>
+  /// Only the working directory is examined for changes
+  /// </summary>
+  | WorkDirOnly = 2
+
+/// <summary>
+/// Options controlling the status behavior.
+/// </summary>
+type StatusOptions =
+  { 
+    /// <summary>
+    /// Which files should be scanned and returned
+    /// </summary>
+    show: StatusShowOption
+
+    /// <summary>
+    /// Examine the staged changes for renames.
+    /// </summary>
+    detectRenamesInIndex: bool
+
+    /// <summary>
+    /// Examine unstaged changes in the working directory for renames.
+    /// </summary>
+    detectRenamesInWorkDir: bool
+
+    /// <summary>
+    /// Exclude submodules from being scanned for status
+    /// </summary>
+    excludeSubmodules: bool
+
+    /// <summary>
+    /// Recurse into ignored directories
+    /// </summary>
+    recurseIgnoredDirs: bool
+
+    /// <summary>
+    /// Recurse into untracked directories
+    /// </summary>
+    recurseUntrackedDirs: bool
+
+    /// <summary>
+    /// Limit the scope of paths to consider to the provided pathspecs
+    /// </summary>
+    /// <remarks>
+    /// If a PathSpec is given, the results from rename detection may
+    /// not be accurate.
+    /// </remarks>
+    pathSpec: string list option
+
+    /// <summary>
+    /// When set to <c>true</c>, the PathSpec paths will be considered
+    /// as explicit paths, and NOT as pathspecs containing globs.
+    /// </summary>
+    disablePathSpecMatch: bool
+
+    /// <summary>
+    /// Include unaltered files when scanning for status
+    /// </summary>
+    /// <remarks>
+    /// Unaltered meaning the file is identical in the working directory, the index and HEAD.
+    /// </remarks>
+    includeUnaltered: bool
+
+    /// <summary>
+    /// Include ignored files when scanning for status
+    /// </summary>
+    /// <remarks>
+    /// ignored meaning present in .gitignore. Defaults to true for back compat but may improve perf to not include if you have thousands of ignored files.
+    /// </remarks>
+    includeIgnored: bool
+
+    /// <summary>
+    /// Include untracked files when scanning for status
+    /// </summary>
+    includeUntracked: bool }
+
+module StatusOptions =
+
+  let defaultOptions = 
+    { show = StatusShowOption.IndexAndWorkDir
+      detectRenamesInIndex = true
+      detectRenamesInWorkDir = false
+      excludeSubmodules = false
+      recurseIgnoredDirs = false
+      recurseUntrackedDirs = true
+      pathSpec = None
+      disablePathSpecMatch = false
+      includeUnaltered = false
+      includeIgnored = true
+      includeUntracked = true }
+
+[<Flags>]
+type FileStatus =
+  /// <summary>
+  /// The file doesn't exist.
+  /// </summary>
+  | Nonexistent = -2147483648
+
+  /// <summary>
+  /// The file hasn't been modified.
+  /// </summary>
+  | Unaltered = 0 // GIT_STATUS_CURRENT
+
+  /// <summary>
+  /// New file has been added to the Index. It's unknown from the Head.
+  /// </summary>
+  | NewInIndex = 1 // GIT_STATUS_INDEX_NEW
+
+  /// <summary>
+  /// New version of a file has been added to the Index. A previous version exists in the Head.
+  /// </summary>
+  | ModifiedInIndex = 2 // GIT_STATUS_INDEX_MODIFIED
+
+  /// <summary>
+  /// The deletion of a file has been promoted from the working directory to the Index. A previous version exists in the Head.
+  /// </summary>
+  | DeletedFromIndex = 4 // GIT_STATUS_INDEX_DELETED
+
+  /// <summary>
+  /// The renaming of a file has been promoted from the working directory to the Index. A previous version exists in the Head.
+  /// </summary>
+  | RenamedInIndex = 8 // GIT_STATUS_INDEX_RENAMED
+
+  /// <summary>
+  /// A change in type for a file has been promoted from the working directory to the Index. A previous version exists in the Head.
+  /// </summary>
+  | TypeChangeInIndex = 16 // GIT_STATUS_INDEX_TYPECHANGE
+
+  /// <summary>
+  /// New file in the working directory, unknown from the Index and the Head.
+  /// </summary>
+  | NewInWorkdir = 128 // GIT_STATUS_WT_NEW
+
+  /// <summary>
+  /// The file has been updated in the working directory. A previous version exists in the Index.
+  /// </summary>
+  | ModifiedInWorkdir = 256 // GIT_STATUS_WT_MODIFIED
+
+  /// <summary>
+  /// The file has been deleted from the working directory. A previous version exists in the Index.
+  /// </summary>
+  | DeletedFromWorkdir = 512 // GIT_STATUS_WT_DELETED
+
+  /// <summary>
+  /// The file type has been changed in the working directory. A previous version exists in the Index.
+  /// </summary>
+  | TypeChangeInWorkdir = 1024 // GIT_STATUS_WT_TYPECHANGE
+
+  /// <summary>
+  /// The file has been renamed in the working directory.  The previous version at the previous name exists in the Index.
+  /// </summary>
+  | RenamedInWorkdir = 2048 // GIT_STATUS_WT_RENAMED
+
+  /// <summary>
+  /// The file is unreadable in the working directory.
+  /// </summary>
+  | Unreadable = 4096 // GIT_STATUS_WT_UNREADABLE
+
+  /// <summary>
+  /// The file is <see cref="NewInWorkdir"/> but its name and/or path matches an exclude pattern in a <c>gitignore</c> file.
+  /// </summary>
+  | Ignored = 16384 // GIT_STATUS_IGNORED
+
+  /// <summary>
+  /// The file is <see cref="Conflicted"/> due to a merge.
+  /// </summary>
+  | Conflicted = 32768 // GIT_STATUS_CONFLICTED
+
+[<RequireQualifiedAccess>]
+module FileStatus =
+
+  let has (f: FileStatus) v =
+    (f &&& v) = f

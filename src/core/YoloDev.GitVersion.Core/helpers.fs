@@ -20,25 +20,25 @@ module Int =
 [<RequireQualifiedAccess>]
 module Tuple2 =
 
-  let inline mapRight f (l, r) = (l, f r)
+  let mapRight f (l, r) = (l, f r)
 
 [<RequireQualifiedAccess>]
 module Regex =
 
-  let inline replace pattern (replacement: string) str =
+  let replace pattern (replacement: string) str =
     Regex.Replace (str, pattern, replacement
       #if !NODE
       , RegexOptions.CultureInvariant
       #endif
       )
   
-  let inline escape str =
+  let escape str =
     Regex.Escape str
 
 [<RequireQualifiedAccess>]
 module Seq =
 
-  let inline tryMaxAndCount seq =
+  let tryMaxAndCount seq =
     Seq.fold (fun (count, max) next ->
       match max with
       | None -> count + 1, Some next
@@ -86,6 +86,11 @@ module Seq =
       isDone <- completed
     
     state
+  
+  let safeSkip (n: int) =
+    Seq.indexed
+    >> Seq.filter (fun (i, _) -> i >= n)
+    >> Seq.map snd
 
 [<RequireQualifiedAccess>]
 module Map =
@@ -121,5 +126,19 @@ module IOSeq =
         then Some next
         else Some prev) None seq
   
-  let inline count seq =
+  let count seq =
     IOSeq.fold (fun s _ -> s + 1) 0 seq
+
+#if NODE
+open Fable.Core
+#endif
+
+#if NODE
+[<Emit("debugger")>]
+#endif
+let debugger () =
+  #if !NODE
+  ()
+  #else
+  jsNative
+  #endif

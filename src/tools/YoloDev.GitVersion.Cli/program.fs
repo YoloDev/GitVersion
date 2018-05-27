@@ -15,14 +15,14 @@ let main argv =
   
   printfn "Dir: %s" dir
 
-  io {
-    let! repo = Repo.openExisting dir
-    return! Version.prevVersion repo
-  }
-  |> IO.run
-  |> Async.RunSynchronously
-  |> Option.defaultValue (Semver.parse "0.1.0")
-  |> printfn "Prev version: %A"
+  // io {
+  //   let! repo = Repo.openExisting dir
+  //   return! Version.prevVersion repo
+  // }
+  // |> IO.run
+  // |> Async.RunSynchronously
+  // |> Option.defaultValue (Semver.parse "0.1.0")
+  // |> printfn "Prev version: %A"
 
   Repo.openExisting dir
   |> IO.bind Version.newReleaseVersion

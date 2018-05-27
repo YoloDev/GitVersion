@@ -49,9 +49,16 @@ type BranchWrapper (branch: Branch) =
   interface IDisposable with
     member __.Dispose () = ()
 
-type CommitLogWrapper (commitLog: IQueryableCommitLog) =
+type CommitLogWrapper (repo: Repository, commitLog: IQueryableCommitLog) =
 
   interface ICommitLog with
+
+    member __.Get s =
+      repo.Lookup<Commit> s
+      |> Option.ofObj
+      |> Option.map (fun c -> new CommitWrapper (c) :> ICommit)
+      |> IO.unit
+
     member __.Seq =
       commitLog
       |> Seq.map (fun c -> new CommitWrapper (c) :> ICommit)
@@ -82,7 +89,7 @@ type RepositoryWrapper (repo: Repository, dispose: (unit -> unit) option) =
       |> IOSeq.ofSeq
     
     member __.Commits =
-      new CommitLogWrapper (repo.Commits) :> ICommitLog
+      new CommitLogWrapper (repo, repo.Commits) :> ICommitLog
     
     member __.Head = 
       IO.delay <|
@@ -106,6 +113,12 @@ type RepositoryWrapper (repo: Repository, dispose: (unit -> unit) option) =
           repo.ApplyTag name
           |> TagWrapper.ofTag
           |> IO.unit
+    
+    member __.IsDirty =
+      IO.delay <|
+        fun () ->
+          let status = repo.RetrieveStatus ()
+          IO.unit status.IsDirty
 
   interface IDisposable with
     member __.Dispose () = 

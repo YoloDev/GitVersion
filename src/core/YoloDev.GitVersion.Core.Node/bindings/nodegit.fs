@@ -4,6 +4,8 @@ open System
 open Fable.Core
 open Fable.Import.JS
 open Fable.Core
+open System
+open System.Security.Cryptography
 
 type ObjectType =
   | ANY = -2
@@ -23,6 +25,41 @@ type ReferenceType =
   | SYMBOLIC = 2
   | LISTALL = 3
 
+type ErrorCode =
+  /// <summary>
+  /// Input does not exist in the scope searched.
+  /// </summary>
+  | NotFound = -3
+
+  /// <summary>
+  /// There are no more entries left to iterate.
+  /// </summary>
+  | IterOver = -31
+
+type GitStatusShow =
+  | IndexAndWorkDir = 0
+  | IndexOnly = 1
+  | WorkDirOnly = 2
+
+[<Flags>]
+type GitStatusOptionFlags =
+  | IncludeUntracked             = 0b0000000000000001
+  | IncludeIgnored               = 0b0000000000000010
+  | IncludeUnmodified            = 0b0000000000000100
+  | ExcludeSubmodules            = 0b0000000000001000
+  | RecurseUntrackedDirs         = 0b0000000000010000
+  | DisablePathspecMatch         = 0b0000000000100000
+  | RecurseIgnoredDirs           = 0b0000000001000000
+  | RenamesHeadToIndex           = 0b0000000010000000
+  | RenamesIndexToWorkDir        = 0b0000000100000000
+  | SortCaseSensitively          = 0b0000001000000000
+  | SortCaseInsensitively        = 0b0000010000000000
+  | RenamesFromRewrites          = 0b0000100000000000
+  | NoRefresh                    = 0b0001000000000000
+  | UpdateIndex                  = 0b0010000000000000
+  | IncludeUnreadable            = 0b0100000000000000
+  | IncludeUnreadableAsUntracked = 0b1000000000000000
+
 [<AllowNullLiteral>]
 type Oid =
   abstract tostrS: unit -> string
@@ -35,18 +72,17 @@ type OidStatic =
 type GitObject =
   abstract free: unit -> unit
   abstract id: unit -> Oid
-  abstract peel: ObjectType -> Promise<GitObject>
+  abstract peel: ObjectType -> Promise<GitObject option>
   abstract owner: unit -> Repository
   abstract ``type``: unit -> ObjectType
 
 type GitObjectStatic =
   abstract lookup: Repository -> Oid -> ObjectType -> Promise<GitObject>
-  [<Emit("$0.lookup($1,$2)")>]
+  [<Emit("$0.lookup($1,$2,$3)")>]
   abstract lookupS: Repository -> string -> ObjectType -> Promise<GitObject>
 
 [<AllowNullLiteral>]
 type Reference =
-  abstract free: unit -> unit
   abstract isBranch: unit -> int
   abstract isNote: unit -> int
   abstract isRemote: unit -> int
@@ -106,6 +142,9 @@ type Revwalk =
 type RevwalkStatic =
   abstract create: Repository -> Revwalk
 
+type Index =
+  abstract read: bool -> Promise<int>
+
 type Repository =
   abstract free: unit -> unit
   abstract head: unit -> Promise<Reference>
@@ -113,10 +152,54 @@ type Repository =
   abstract createLightweightTag: Oid -> string -> Promise<Reference>
   abstract createCommitOnHead: string array -> Signature -> Signature -> string -> Promise<Oid>
   abstract getTagByName: string -> Promise<Tag>
+  abstract index: unit -> Promise<Index>
 
 type RepositoryStatic =
   abstract ``open``: string -> Promise<Repository>
   abstract init: string -> int -> Promise<Repository>
+
+type RevparseStatic =
+  abstract single: Repository -> string -> Promise<GitObject option>
+
+type StatusOptions =
+  abstract flags: GitStatusOptionFlags with get,set
+  abstract pathspec: string array with get,set
+  abstract show: GitStatusShow with get,set
+  abstract version: int with get,set
+
+type StatusOptionsStatic =
+  [<Emit("new $0()")>]
+  abstract create: unit -> StatusOptions
+
+type StatusList =
+  abstract entrycount: unit -> int
+  abstract free: unit -> unit
+
+type StatusListStatic =
+  abstract create: Repository -> StatusOptions -> Promise<StatusList>
+
+type DiffDelta =
+  abstract flags: int
+  abstract newFile: DiffFile
+  abstract nfiles: int
+  abstract oldFile: DiffFile
+  abstract similarity: int
+  abstract status: int
+
+type DiffFile =
+  abstract flags: unit -> int
+  abstract id: unit -> Oid
+  abstract mode: unit -> int
+  abstract path: unit -> string
+  abstract size: unit -> int
+
+type StatusEntry =
+  abstract headToIndex: DiffDelta option
+  abstract indexToWorkdir: DiffDelta option
+  abstract status: int
+
+type StatusStatic =
+  abstract byIndex: StatusList -> int -> StatusEntry
 
 type IExports =
   abstract Oid: OidStatic
@@ -128,6 +211,10 @@ type IExports =
   abstract Tag: TagStatic
   abstract Reference: ReferenceStatic
   abstract Object: GitObjectStatic
+  abstract Revparse: RevparseStatic
+  abstract StatusOptions: StatusOptionsStatic
+  abstract StatusList: StatusListStatic
+  abstract Status: StatusStatic
 
 [<Import("*", "nodegit")>]
 let nodegit: IExports = Exceptions.jsNative

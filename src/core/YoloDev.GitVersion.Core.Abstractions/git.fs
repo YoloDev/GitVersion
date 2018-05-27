@@ -89,6 +89,8 @@ module CommitFilter =
 type CommitLog internal (log: ICommitLog) =
   inherit IOSeq<Commit> (IOSeq.forkSeq (log.Seq |> IOSeq.map Commit))
 
+  member internal __.Get (sha: string) = log.Get sha |> IO.map (Option.map Commit)
+
   member internal __.Query (filter: CommitFilter) =
     log.Query filter
     |> IOSeq.map Commit
@@ -96,6 +98,8 @@ type CommitLog internal (log: ICommitLog) =
 module CommitLog =
 
   let query f (l: CommitLog) = l.Query f
+
+  let get (Hash h) (l: CommitLog) = l.Get h
 
 [<RequireQualifiedAccess>]
 module Repo =
@@ -119,6 +123,9 @@ module Repo =
   
   let tag s (Repo r) =
     r.Tag s |> IO.map Tag
+  
+  let isDirty (Repo r) =
+    r.IsDirty
 
 [<RequireQualifiedAccess>]
 module Commit =

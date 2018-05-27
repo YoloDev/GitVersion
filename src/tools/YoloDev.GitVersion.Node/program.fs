@@ -14,8 +14,6 @@ module Helpers =
   [<Emit("debugger;")>]
   let debug () = jsNative
 
-  let inline debugF f v = debug (); f v
-
 let main argv =
   let dir =
     match List.tryHead argv with
@@ -25,12 +23,12 @@ let main argv =
   printfn "Dir: %s" dir
 
   Repo.openExisting dir
-  |> IO.bind Version.prevVersion
-  |> IO.map (Option.defaultValue (Semver.parse "0.1.0"))
-  |> IO.map (printfn "Prev version: %O")
+  // |> IO.bind Version.prevVersion
+  // |> IO.map (Option.defaultValue (Semver.parse "0.1.0"))
+  // |> IO.map (printfn "Prev version: %O")
   |> IO.bind (fun _ ->
     Repo.openExisting dir
-    |> IO.bind (Helpers.debugF Version.newReleaseVersion)
+    |> IO.bind Version.newReleaseVersion
     |> IO.map (printfn "New tag version: %O")
     |> IO.bind (fun _ ->
       Repo.openExisting dir

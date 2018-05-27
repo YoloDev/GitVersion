@@ -8,7 +8,7 @@ const babelOptions = fableUtils.resolveBabelOptions({
 });
 
 export default [
-  {
+  /*{
     input: path.resolve(
       __dirname,
       'src/tools/YoloDev.GitVersion.Node/YoloDev.GitVersion.Node.fsproj',
@@ -28,7 +28,7 @@ export default [
       prettier({ tabWidth: 2, singleQuote: false }),
     ],
     external: ['nodegit', 'fs', 'path', 'os'],
-  },
+  },*/
   {
     input: path.resolve(
       __dirname,

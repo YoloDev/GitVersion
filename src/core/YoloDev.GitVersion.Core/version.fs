@@ -109,66 +109,74 @@ module Commit =
 [<RequireQualifiedAccess>]
 module SingleVersion =
 
-  let prevTag repo =
-    Repo.tags repo
-    |> IOSeq.chooseM Tag.singleVersionTag
-    |> IOSeq.tryHead
-  
-  let diff tag repo =
+  let versionInfo repo =
     io {
-      let commits = Repo.commits repo
-      let! head = IOSeq.tryHead commits
-      let! tagHash = Tag.hash tag
-
-      let! isSame =
-        match head with
-        | None   -> IO.unit false
-        | Some c -> 
-          Commit.hash c
-          |> IO.map ((=) tagHash)
+      let mutable tags = Map.empty
+      for tag in Repo.tags repo do
+        let! versionTag = Tag.singleVersionTag tag
+        match versionTag with
+        | None -> ()
+        | Some versionTag ->
+          let! sha = Tag.hash tag
+          let! name = Tag.name tag
+          match Map.tryFind sha tags with
+          | None          -> tags <- Map.add sha (versionTag.version, name) tags
+          | Some version  -> 
+            tags <- 
+              if fst version > versionTag.version
+              then tags
+              else Map.add sha (versionTag.version, name) tags
       
-      if isSame then 
-        return SameCommit
-      else
-        return!
-          commits
-          |> CommitLog.query (CommitFilter.revWalk |> CommitFilter.withExcludeReachableFrom [tagHash])
-          |> IOSeq.chooseM (Commit.message >> IO.map (Commit.semverMessage "Semver"))
-          |> IOSeq.tryMax
-          |> IO.map ((Option.defaultValue Patch) >> DiffCommits)
-    }
-  
+      let commitIsTagged commit =
+        io {
+          let! sha = Commit.hash commit
+          return Map.containsKey sha tags
+        }
 
-  let prerelease tag repo =
-    io {
-      let! branchName = Repo.branchName repo
-      let! tip = Repo.head repo |> IO.bind Branch.tip
-      let! branchHash =
-        match tip with
-        | None -> IO.unit Hash.initial
-        | Some commit -> Commit.hash commit
-        
-      let! filter =
-        match tag with
-        | None -> IO.unit CommitFilter.revWalk
-        | Some tag -> 
-          Tag.hash tag
-          |> IO.map (fun tagHash -> CommitFilter.revWalk |> CommitFilter.withExcludeReachableFrom [tagHash])
-      match branchName with
-      | Master ->
-        return!
-          Repo.commits repo
-          |> CommitLog.query filter
-          |> IOSeq.count
-          |> IO.map MasterPre
-      | Branch name ->
-        return!
-          Branch.distanceFromMaster repo
-          |> IO.map (fun count -> BranchPre (name, branchHash, count))
-      | PullRequest n ->
-        return!
-          Branch.distanceFromMaster repo
-          |> IO.map (fun count -> PullRequestPre (n, branchHash, count))
+      // Issue probably in takeUntilIncludingM
+      let! commits =
+        Repo.commits repo
+        |> IOSeq.takeUntilIncludingM commitIsTagged
+        |> IOSeq.mapM (IO.using Commit.hash)
+        |> IO.map (Seq.rev >> Array.ofSeq)
+      
+      let prevVersion, prevTag =
+        commits
+        |> Array.tryHead
+        |> Option.bind (fun sha -> Map.tryFind sha tags)
+        |> Option.map (fun (v, t) -> Some v, Some t)
+        |> Option.defaultValue (None, None)
+      
+      let skipCount =
+        match prevTag with
+        | None   -> 0
+        | Some _ -> 1
+
+      let changeKind = Commit.semverMessage "Semver"
+      let mutable change = Change.Patch
+      for commitSha in Seq.safeSkip skipCount commits do
+        if change = Change.Major
+        then ()
+        else
+          let! commitOpt = CommitLog.get commitSha (Repo.commits repo)
+          use commit = Option.get commitOpt
+          let! msg = Commit.message commit
+          match changeKind msg with
+          | Some c when c > change -> change <- c
+          | _                      -> ()
+
+      use! branch = Repo.head repo
+      let! branchName = Branch.name branch
+      let! dirty = Repo.isDirty repo
+
+      return
+        { prevVersion = prevVersion
+          prevTag = prevTag
+          change = change
+          commitsSinceVersion = Array.length commits - skipCount
+          branch = branchName
+          sha = Array.tryLast commits
+          dirty = dirty }
     }
 
 // [<RequireQualifiedAccess>]

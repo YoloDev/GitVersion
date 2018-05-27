@@ -7,11 +7,15 @@ open System.Collections
 open global.System
 open System.Linq
 
+#if NODE
+open Fable.Core
+#endif
+
 [<AutoOpen>]
 module private Helpers =
   [<RequireQualifiedAccess>]
   module Int =
-    let inline parse (s: string) = 
+    let parse (s: string) = 
       try System.Int32.Parse (s, CultureInfo.InvariantCulture)
       with :? FormatException -> failwithf "'%s' was not a number" s
   
@@ -31,12 +35,31 @@ module private Helpers =
     { new IComparer with
       member __.Compare (x, y) = Unchecked.compare x y }
     #endif
+  
+  #if NODE
+  [<Emit("$0 || $1")>]
+  let __safe (_a: 'a) (_b: 'a) : 'a = jsNative
+  #endif
+
+  let safeEq (eq: IEqualityComparer) =
+    #if !NODE
+    eq
+    #else
+    __safe eq equalityComparer
+    #endif
+  
+  let safeCmp (eq: IComparer) =
+    #if !NODE
+    eq
+    #else
+    __safe eq comparer
+    #endif
 
   [<RequireQualifiedAccess>]
   module String =
-    let inline split (del: char) (s: string) = s.Split del |> List.ofArray
+    let split (del: char) (s: string) = s.Split del |> List.ofArray
 
-  let inline (|LT|EQ|GT|) n =
+  let (|LT|EQ|GT|) n =
     if n < 0
     then LT
     elif n > 0
@@ -50,7 +73,7 @@ module private Helpers =
       #endif
       )
   
-  let inline (|Number|String|) s =
+  let (|Number|String|) s =
     match numEx.Match s with
     | null                 -> String s
     | m when not m.Success -> String s
@@ -67,6 +90,7 @@ type Segment =
     | Str s -> s
 
   member s.GetHashCode (cmp: IEqualityComparer) =
+    let cmp = safeEq cmp
     match s with
     | Num n -> cmp.GetHashCode <| (0, n)
     | Str s -> cmp.GetHashCode <| (1, s)
@@ -75,6 +99,7 @@ type Segment =
     s.GetHashCode equalityComparer
 
   member s1.Equals (o: obj, comparer: IEqualityComparer) =
+    let comparer = safeEq comparer
     match o with
     | :? Segment as s2 ->
       match s1, s2 with
@@ -87,6 +112,7 @@ type Segment =
     s1.Equals (o, equalityComparer)
   
   member s1.CompareTo (o: obj, comparer: IComparer) =
+    let comparer = safeCmp comparer
     match o with
     | :? Segment as s2 ->
       match s1, s2 with
@@ -102,18 +128,22 @@ type Segment =
   member s1.CompareTo (s2: Segment) =
     s1.CompareTo (s2, comparer)
 
+#if !NODE
   interface System.IComparable<Segment> with
     member s1.CompareTo s2 = s1.CompareTo s2
   
   interface System.IComparable with
     member s1.CompareTo s2 = s1.CompareTo s2
+#endif
 
   interface IStructuralComparable with
     member s1.CompareTo (s2, comparer) = s1.CompareTo (s2, comparer)
-  
+
+#if !NODE
   interface System.IEquatable<Segment> with
     member s1.Equals s2 = s1.Equals s2
-  
+#endif
+
   interface IStructuralEquatable with
     member s1.Equals (o, comparer) = s1.Equals (o, comparer)
     member s1.GetHashCode comparer = s1.GetHashCode comparer
@@ -121,6 +151,7 @@ type Segment =
 [<AutoOpen>]
 module private SegmentHelpers =
   let compareMeta v1 v2 (comparer: IComparer) =
+    let comparer = safeCmp comparer
     let rec cmp l1 l2 =
       match l1, l2 with
       | []  , []   ->  0
@@ -134,7 +165,7 @@ module private SegmentHelpers =
     
     cmp v1 v2
   
-  let inline parseMeta (name: string) (meta: string) =
+  let parseMeta (name: string) (meta: string) =
     match meta with
     | "" -> Ok []
     | meta ->
@@ -185,6 +216,7 @@ type Semver =
     v.GetHashCode equalityComparer
 
   member v1.Equals (o: obj, comparer: IEqualityComparer) =
+    let comparer = safeEq comparer
     match o with
     | :? Semver as v2 ->
       comparer.Equals (v1.major, v2.major) &&
@@ -198,6 +230,7 @@ type Semver =
     v1.Equals (o, equalityComparer)
   
   member v1.CompareTo (o: obj, comparer: IComparer) =
+    let comparer = safeCmp comparer
     match o with
     | :? Semver as v2 ->
       match comparer.Compare (v1.major, v2.major) with
@@ -237,18 +270,22 @@ type Semver =
   member v1.CompareTo (v2: Semver) =
     v1.CompareTo (v2, comparer)
 
+#if !NODE
   interface System.IComparable<Semver> with
     member v1.CompareTo v2 = v1.CompareTo v2
   
   interface System.IComparable with
     member v1.CompareTo v2 = v1.CompareTo v2
+#endif
 
   interface IStructuralComparable with
     member v1.CompareTo (v2, comparer) = v1.CompareTo (v2, comparer)
-  
+
+#if !NODE
   interface System.IEquatable<Semver> with
     member v1.Equals v2 = v1.Equals v2
-  
+#endif  
+
   interface IStructuralEquatable with
     member v1.Equals (o, comparer) = v1.Equals (o, comparer)
     member v1.GetHashCode comparer = v1.GetHashCode comparer
@@ -273,8 +310,8 @@ module Parsing =
   
   [<RequireQualifiedAccess>]
   module private Match =
-    let inline group (g: Groups) (m: Match) = m.Groups.[int g].Value
-    let inline groupOrDefault (g: Groups) (defaultVal: string) (m: Match) =
+    let group (g: Groups) (m: Match) = m.Groups.[int g].Value
+    let groupOrDefault (g: Groups) (defaultVal: string) (m: Match) =
       let group = m.Groups.[int g]
       match group.Success with
       | false -> defaultVal

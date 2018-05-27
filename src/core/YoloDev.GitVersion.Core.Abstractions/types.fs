@@ -24,7 +24,7 @@ type
   #if !NODE
   internal 
   #endif 
-  Done = Result<unit, exn> -> FakeUnit
+  Done = Result<bool, exn> -> FakeUnit
 
 type 
   #if !NODE
@@ -85,6 +85,7 @@ type
     inherit System.IDisposable
     abstract member Seq: IOSeq<ICommit>
     abstract member Query: ICommitFilter -> IOSeq<ICommit>
+    abstract member Get: string -> IO<ICommit option>
 
 type 
   #if !NODE
@@ -97,6 +98,7 @@ type
     abstract member Head: IO<IBranch>
     abstract member Commit: string -> IO<ICommit>
     abstract member Tag: string -> IO<ITag>
+    abstract member IsDirty: IO<bool>
 
 [<NoEquality; NoComparison>]
 type IO<'t> 
@@ -119,7 +121,7 @@ type IOSeq<'t>
         cont' (Ok true)
       let onDone r =
         match r with
-        | Ok () -> items |> Seq.rev |> Ok |> cont
+        | Ok _ -> items |> Seq.rev |> Ok |> cont
         | Error e -> cont (Error e)
       
       forkSeq sys onNext onDone)

@@ -12,6 +12,17 @@ module internal Helpers =
       if ran
       then failwithf "Function %s can only be called once" name
       else f ()
+  
+  [<RequireQualifiedAccess>]
+  module Result =
+    let attempt f v =
+      try Ok (f v)
+      with e -> Error e
+
+    let mapAttempt f v =
+      try
+        Result.map f v
+      with e -> Error e
 
 [<RequireQualifiedAccess>]
 module IO =
@@ -29,23 +40,31 @@ module IO =
   let unit x = IO <| fun _ cont -> 
     cont (Ok x)
   
+  let fail e = IO <| fun _ cont ->
+    cont (Error e)
+  
   let zero = unit ()
 
   let map f ma = IO <| fun sys cont ->
-    fork ma sys (Result.map f >> cont)
+    fork ma sys (Result.mapAttempt f >> cont)
   
   let bind f ma = IO <| fun sys cont ->
     let cont' ra = 
       match ra with
-      | Ok a -> fork (f a) sys cont
+      | Ok a -> 
+        let mb = Result.attempt f a
+        match mb with
+        | Ok mb -> fork mb sys cont
+        | Error e -> cont (Error e)
       | Error e -> cont (Error e)
 
     fork ma sys cont'
   
   let tryFinally (cleanup: unit -> unit) ma = IO <| fun sys cont ->
     let cont' ra =
-      cleanup ()
-      cont ra
+      match Result.attempt cleanup () with
+      | Ok ()   -> cont ra
+      | Error e -> cont (Error e)
     
     fork ma sys cont'
   
@@ -76,8 +95,9 @@ module IO =
 
   let tapResult f ma = IO <| fun sys cont ->
     let cont' ra =
-      f ra
-      cont ra
+      match Result.attempt f ra with
+      | Ok () -> cont ra
+      | Error e -> cont (Error e)
     
     fork ma sys cont'
   
@@ -89,7 +109,12 @@ module IO =
   [<GeneralizableValue>]
   let toResult ma = IO <| fun sys cont ->
     fork ma sys (Ok >> cont)
+  
+  let foreach f s =
+    Seq.fold (fun state t -> combine state (delay (fun () -> f t))) zero s
 
+// TODO: There are likley A LOT of places where
+// errors can fall through here :(
 [<RequireQualifiedAccess>]
 module IOSeq =
 
@@ -105,10 +130,10 @@ module IOSeq =
 
   [<GeneralizableValue>]
   let empty<'a> : IOSeq<'a> = IOSeq <| fun _ _ cont ->
-    cont (Ok ())
+    cont (Ok true)
 
   let singleton x = IOSeq <| fun _ next cont ->
-    next x (Result.map ignore >> cont)
+    next x cont
   
   let map f ma = IOSeq <| fun sys next cont ->
     forkSeq ma sys (f >> next) cont
@@ -131,9 +156,12 @@ module IOSeq =
   let collect f ma = IOSeq <| fun sys next cont ->
     let next' a cont' = 
       let cnext'' b cont'' = next b (function | Ok true  -> cont'' (Ok true)
-                                              | Ok false -> cont (Ok ())
+                                              | Ok false -> cont (Ok false)
                                               | Error e  -> cont (Error e))
-      let cont'' = function | Ok () -> cont' (Ok true) | Error e -> cont' (Error e)
+
+      let cont'' = function | Ok getNext -> cont' (Ok getNext) 
+                            | Error e -> cont' (Error e)
+
       forkSeq (f a) sys cnext'' cont''
     
     forkSeq ma sys next' cont
@@ -167,13 +195,14 @@ module IOSeq =
   let doWhile f ma = IOSeq <| fun sys next cont ->
     let rec cont' r =
       match r with
-      | Error e -> cont (Error e)
-      | Ok ()   ->
+      | Error e    -> cont (Error e)
+      | Ok false   -> cont (Ok false)
+      | Ok true    ->
         if f ()
         then forkSeq ma sys next cont'
-        else cont (Ok ())
+        else cont (Ok true)
     
-    cont' (Ok ())
+    cont' (Ok true)
   
   let takeWhile f ma = IOSeq <| fun sys next cont ->
     let cnext' a cont' =
@@ -193,6 +222,20 @@ module IOSeq =
     
     forkSeq ma sys cnext' cont
   
+  let takeUntilIncludingM f ma = IOSeq <| fun sys next cont ->
+    let mutable matched = false
+    let next' a cont' =
+      IO.fork (f a) sys <|
+        function
+        | Ok false -> next a cont'
+        | Ok true when not matched ->
+          matched <- true
+          next a cont'
+        | Ok true -> cont' (Ok false)
+        | Error e -> cont' (Error e)
+    
+    forkSeq ma sys next' cont
+  
   let fold f s ma = IO <| fun sys cont ->
     let mutable state = s
     let cnext a cont' =
@@ -201,25 +244,21 @@ module IOSeq =
     
     let cont' =
       function
-      | Ok ()   -> cont (Ok state)
+      | Ok _    -> cont (Ok state)
       | Error e -> cont (Error e)
     
     forkSeq ma sys cnext cont'
   
   let tryFinally (cleanup: unit -> unit) ma = IOSeq <| fun sys next cont ->
     let cont' ra =
-      cleanup ()
-      cont ra
+      match Result.attempt cleanup () with
+      | Ok ()   -> cont ra
+      | Error e -> cont (Error e)
     
     forkSeq ma sys next cont'
   
   let using f (d: #System.IDisposable) = tryFinally (fun () -> d.Dispose ()) (f d)
-  
-  let ofIO ma = IOSeq <| fun sys next cont ->
-    IO.fork ma sys <|
-      function
-      | Ok x    -> next x (Result.map ignore >> cont)
-      | Error e -> cont (Error e)
+
   
   let doFirst io seq = IOSeq <| fun sys next cont ->
     IO.fork io sys <|
@@ -232,7 +271,7 @@ module IOSeq =
     
     g |> using (fun g -> IOSeq <| fun _ next cont ->
       let err e = cont (Error e)
-      let cont () = cont (Ok ())
+      let cont () = cont (Ok true)
       
       let rec move () =
         if not (g.MoveNext ())
@@ -250,10 +289,36 @@ module IOSeq =
     let mutable itm = None
     forkSeq s sys 
       (fun v cont ->
+        // TODO: Remove once fixed
+        match itm with
+        | Some _ -> failwithf "seq:next called more times than expected!"
+        | None   -> ()
         itm <- Some v
         cont (Ok false))
-      (function | Ok () -> cont (Ok itm) | Error e -> cont (Error e))
+      (function | Ok _ -> cont (Ok itm) | Error e -> cont (Error e))
+  
+  let foreach (f: 'a -> #IOSeq<'b>) (s: #seq<'a>): IOSeq<'b> =
+    ofSeq s |> collect f
+  
+  let catchBind (f: exn -> #IOSeq<'t>) (s: #IOSeq<'t>) = IOSeq <| fun sys next cont ->
+    let cont' r =
+      match r with
+      | Ok wantMore -> cont (Ok wantMore)
+      | Error e     ->
+        match Result.attempt f e with
+        | Ok mb   -> forkSeq mb sys next cont
+        | Error e -> cont (Error e)
     
+    forkSeq s sys next cont'
+  
+  let concat (ma: #IOSeq<'t>) (mb: #IOSeq<'t>) = IOSeq <| fun sys next cont ->
+    let cont' r =
+      match r with
+      | Error e  -> cont (Error e)
+      | Ok false -> cont (Ok false)
+      | Ok true  -> forkSeq mb sys next cont
+    
+    forkSeq ma sys next cont'
 
 
 [<RequireQualifiedAccess>]
@@ -265,9 +330,11 @@ module Builders =
     member inline __.Return x = IO.unit x
     member inline __.ReturnFrom (ma: #IO<_>) = ma
     member inline __.Bind (ma, f) = IO.bind f ma
-    member inline __.For (s, f) = Seq.fold (fun state t -> IO.combine state (IO.delay (fun () -> f t))) IO.zero s
+    member inline __.For (s, f) = IO.foreach f s
+    member inline __.For (s, f: _ -> #IO<unit>) = IOSeq.mapM f s |> IO.map ignore
     member inline __.Combine (ma, mb) = IO.combine ma mb
     member inline __.TryFinally (ma, f) = IO.tryFinally f ma
+    member inline __.Using (r, f) = IO.using f r
   
   type IOSeqBuilder () =
     member inline __.Delay f = IOSeq.delay f
@@ -275,8 +342,11 @@ module Builders =
     member inline __.Yield x = IOSeq.singleton x
     member inline __.YieldFrom (ma: #IOSeq<_>) = ma
     member inline __.TryFinally (ma, f) = IOSeq.tryFinally f ma
+    member inline __.TryWith (ma, f) = IOSeq.catchBind f ma
     member inline __.Bind (ma, f) = IOSeq.bindIO f ma
     member inline __.While (f, ma) = IOSeq.doWhile f ma
+    member inline __.For (s, f) = IOSeq.foreach f s
+    member inline __.Combine (ma, mb) = IOSeq.concat ma mb
 
 let io = Builders.IOBuilder ()
 let ioSeq = Builders.IOSeqBuilder ()

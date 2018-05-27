@@ -8,7 +8,7 @@ open YoloDev.GitVersion.SystemBuilders
 [<AutoOpen>]
 module private Helpers =
 
-  let inline dispose (d: #IDisposable) = d.Dispose ()
+  let dispose (d: #IDisposable) = d.Dispose ()
 
 type CommitWrapper (commit: Commit) =
   
@@ -30,9 +30,12 @@ type TagWrapper (tag: Tag) =
     member __.Name = IO.unit tag.FriendlyName
     member __.Sha = tag.Target |> IO.map (fun t -> t.Sha)
     member __.Commit = 
-      tag.Target
-      |> IO.bind (fun t -> t.Peel<Commit> typeof<Commit>)
-      |> IO.map (fun c -> new CommitWrapper (c) :> ICommit)
+      io {
+        let! target = tag.Target
+        let! commit = target.Peel<Commit> typeof<Commit>
+
+        return new CommitWrapper (Option.get commit) :> ICommit
+      }
   
   interface IDisposable with
     member __.Dispose () = ()
@@ -53,9 +56,14 @@ type BranchWrapper (branch: Branch) =
   interface IDisposable with
     member __.Dispose () = ()
 
-type CommitLogWrapper (commitLog: QueryableCommitLog) =
+type CommitLogWrapper (repo: Repository, commitLog: QueryableCommitLog) =
 
   interface ICommitLog with
+
+    member __.Get s =
+      repo.Lookup<Commit> (s, typeof<Commit>)
+      |> IO.map (Option.map (fun c -> new CommitWrapper (c) :> ICommit))
+
     member __.Seq =
       commitLog.ToSeq ()
       |> IOSeq.map (fun c -> new CommitWrapper (c) :> ICommit)
@@ -78,7 +86,7 @@ type RepositoryWrapper (repo: Repository, dispose: (unit -> unit) option) =
       |> IOSeq.map (fun t -> new TagWrapper (t) :> ITag)
     
     member __.Commits =
-      new CommitLogWrapper (repo.Commits) :> ICommitLog
+      new CommitLogWrapper (repo, repo.Commits) :> ICommitLog
     
     member __.Head = 
       repo.Head
@@ -94,12 +102,19 @@ type RepositoryWrapper (repo: Repository, dispose: (unit -> unit) option) =
           |> IO.map CommitWrapper.ofCommit
     
     member __.Tag (name: string) =
-      IO.delay <|
-        fun () ->
-          printfn "Actually tag %s" name
+      io {
+        printfn "Actually tag %s" name
 
-          repo.ApplyTag name
-          |> IO.map TagWrapper.ofTag
+        let! tag = repo.ApplyTag name
+        return TagWrapper.ofTag tag
+      }
+    
+    member __.IsDirty =
+      io {
+        let! status = repo.RetrieveStatus None
+
+        return! status.IsDirty
+      }
 
   interface IDisposable with
     member __.Dispose () = 

@@ -11,7 +11,7 @@ type Change =
 [<RequireQualifiedAccess>]
 module Change =
 
-  let inline addTo version =
+  let addTo version =
     function
     | Patch    -> 
       { version with 
@@ -52,3 +52,22 @@ module VersionTag =
   let version tv = tv.version
 
   let internal tag tv = tv.tag
+
+type VersionInfo =
+  internal { prevVersion : Semver option
+             prevTag : string option
+             change : Change
+             commitsSinceVersion : int
+             branch : string
+             sha : Hash option 
+             dirty : bool }
+
+module VersionInfo =
+
+  let prevVersion i = i.prevVersion
+  let prevTag i = i.prevTag
+  let change i = i.change
+  let commitsSinceVersion i = i.commitsSinceVersion
+  let branch i = i.branch
+  let sha i = i.sha
+  let dirty i = i.dirty

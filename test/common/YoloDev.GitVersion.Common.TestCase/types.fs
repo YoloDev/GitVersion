@@ -6,6 +6,19 @@ open YoloDev.GitVersion.Core
 open System
 
 [<AutoOpen>]
+module internal Helpers =
+
+#if NODE
+  open Fable.Core
+
+  [<Emit("debugger;")>]
+  let debugger () : unit = jsNative
+
+#else
+  let debugger () : unit = ()
+#endif
+
+[<AutoOpen>]
 module private Parsing =
   let tokens (origStr: string) =
     let tokens = System.Collections.Generic.List ()
@@ -74,9 +87,7 @@ module TestStep =
     
     | Release ->
       YoloDev.GitVersion.SingleRepo.Version.newReleaseVersion repo
-      |> IO.bind (function
-                  | None   -> failwithf "No release available"
-                  | Some v -> IO.combine (Repo.tag (sprintf "v%A" v) repo) IO.zero)
+      |> IO.bind (fun v -> IO.combine (Repo.tag (sprintf "v%A" v) repo) IO.zero)
 
 type TestKind =
   | Simple
@@ -114,5 +125,8 @@ module TestCase =
     io {
       for index, step in Seq.indexed case.steps do
         printfn "Eval %A" step
+        debugger ()
+        
         do! TestStep.evaluate repo case.name index step
+        printfn "Done eval %A" step
     }

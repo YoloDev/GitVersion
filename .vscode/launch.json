@@ -17,20 +17,16 @@
       "stopAtEntry": false,
       "internalConsoleOptions": "openOnSessionStart",
       "justMyCode": false,
-      "symbolOptions": {
-        "searchPaths": [],
-        "searchMicrosoftSymbolServer": true
-      },
       "suppressJITOptimizations": true,
-      "env": {
-        "COMPlus_ZapDisable": "1"
-      },
       "enableStepFiltering": false,
-      "requireExactSource": false,
+      "requireExactSource": true,
       "sourceLinkOptions": {
         "*": {
           "enabled": true
         }
+      },
+      "logging": {
+        "moduleLoad": false
       }
     }
   ]
