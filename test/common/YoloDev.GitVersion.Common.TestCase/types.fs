@@ -3,7 +3,11 @@ module YoloDev.GitVersion.Common.TestCase
 
 open YoloDev.GitVersion
 open YoloDev.GitVersion.Core
+open YoloDev.GitVersion.Core.Logging
+open YoloDev.GitVersion.Core.Logging.Message
 open System
+
+let logger = Log.create "YoloDev.GitVersion.Common.TestCase"
 
 [<AutoOpen>]
 module internal Helpers =
@@ -77,10 +81,7 @@ module TestStep =
       YoloDev.GitVersion.SingleRepo.Version.currentVersion repo
       |> IO.map (fun actual ->
         if expected <> actual then
-          //printfn "Step %d at %s: Expected %A to be %A" index name actual expected
-          failwithf "Step %d at %s: Expected %A to be %A" index name actual expected
-        //else
-          (*printfn "Version was %A as expected" actual*))
+          failwithf "Step %d at %s: Expected %A to be %A" index name actual expected)
     
     | Commit m ->
       IO.combine (Repo.commit m repo) IO.zero
@@ -123,10 +124,22 @@ module TestCase =
   
   let run repo case =
     io {
+      do! logger.infoIO (
+            eventX "Starting test case {case}"
+            >> setField "case" case.name)
+
       for index, step in Seq.indexed case.steps do
-        printfn "Eval %A" step
+        do! logger.infoIO (
+              eventX "Evaluate {step}"
+              >> setField "step" step)
         debugger ()
         
         do! TestStep.evaluate repo case.name index step
-        printfn "Done eval %A" step
+        do! logger.infoIO (
+              eventX "Done evaluating {step}"
+              >> setField "step" step)
+      
+      do! logger.infoIO (
+            eventX "Done running test case {case}"
+            >> setField "case" case.name)
     }

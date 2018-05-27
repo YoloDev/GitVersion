@@ -4,6 +4,8 @@
     <TargetFramework>netstandard2.0</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
+    <None Include="paket.references" />
+    <Compile Include="logging.fs" />
     <Compile Include="types.fs" />
     <Compile Include="builders.fs" />
     <Compile Include="env.fs" />

@@ -3,18 +3,16 @@
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
   </PropertyGroup>
-
   <ItemGroup>
+    <None Include="paket.references" />
     <Compile Include="bindings/nodegit.fs" />
     <Compile Include="shim.fs" />
     <Compile Include="types.fs" />
     <Compile Include="run.fs" />
     <Compile Include="testHelpers.fs" />
   </ItemGroup>
-
   <ItemGroup>
     <ProjectReference Include="..\YoloDev.GitVersion.Core.Abstractions\YoloDev.GitVersion.Core.Abstractions.fsproj" />
   </ItemGroup>
-  
   <Import Project="..\..\..\.paket\Paket.Restore.targets" />
 </Project>

@@ -4,6 +4,8 @@ open System
 open YoloDev.GitVersion.Core.Abstractions
 open YoloDev.GitVersion.SystemBuilders
 open YoloDev.GitVersion.Core.Git
+open YoloDev.GitVersion.Core.Logging
+open YoloDev.GitVersion.Core.Logging.Message
 open Bindings
 open Fable.Core
 open Fable.Import
@@ -11,6 +13,8 @@ open Fable.PowerPack
 open Fable
 open Bindings.NodeGit
 open System.Security.Cryptography
+
+let logger = Log.create "YoloDev.GitVersion.Core.Node.Shim"
 
 [<AutoOpen>]
 module internal Helpers =
@@ -408,7 +412,10 @@ type Repository internal (repo: NodeGit.Repository) as this =
       match tip with
       | None -> return failwith "Head has no commits"
       | Some commit ->
-        printfn "Apply tag with name '%s' to commit '%s'" name commit.Sha
+        do! logger.debugIO (
+              eventX "Tag {commit} with {name}"
+              >> setField "commit" commit.Sha
+              >> setField "name" name)
         let! ref = IO.ofPromiseFactory (fun () -> repo.createLightweightTag commit.Id.Oid name)
 
         let name = ref.name ()

@@ -4,12 +4,15 @@ module YoloDev.GitVersion.Semver
 open System.Text.RegularExpressions
 open System.Globalization
 open System.Collections
-open global.System
+open System
 open System.Linq
+open YoloDev.GitVersion.Core
 
 #if NODE
 open Fable.Core
 #endif
+
+let logger = Logging.Log.create "YoloDev.GitVersion.Semver"
 
 [<AutoOpen>]
 module private Helpers =

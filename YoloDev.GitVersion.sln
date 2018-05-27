@@ -38,6 +38,14 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 	ProjectSection(SolutionItems) = preProject
 		.editorconfig = .editorconfig
 		.gitignore = .gitignore
+		paket.dependencies = paket.dependencies
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "cases", "cases", "{E190F7F7-DB42-427A-8CC4-87EF7C396594}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "simple", "simple", "{324F03CF-5AAD-40CF-8E42-9810C4C2FE5E}"
+	ProjectSection(SolutionItems) = preProject
+		cases\simple\01.case = cases\simple\01.case
 	EndProjectSection
 EndProject
 Global
@@ -177,6 +185,7 @@ Global
 		{37F4DE56-94F8-489F-B206-C489973E5F4A} = {D95307EA-5AF6-45B5-9F03-EFAED5213201}
 		{9AAD9F44-F86E-43C1-8EC7-7F943029CD60} = {3CDEBD6D-0B9A-4F5F-AA26-B3F75D6D8C33}
 		{7CAA5A08-B9CC-4F0E-ADFA-531A5E26F0AF} = {9AAD9F44-F86E-43C1-8EC7-7F943029CD60}
+		{324F03CF-5AAD-40CF-8E42-9810C4C2FE5E} = {E190F7F7-DB42-427A-8CC4-87EF7C396594}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {B793CBCF-0E4A-46E5-A3C1-CE768318AB84}

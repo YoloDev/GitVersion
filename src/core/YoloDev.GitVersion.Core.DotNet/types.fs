@@ -4,6 +4,19 @@ open System
 open LibGit2Sharp
 open YoloDev.GitVersion.Core.Abstractions
 open YoloDev.GitVersion.SystemBuilders
+open YoloDev.GitVersion.Core.Logging
+open YoloDev.GitVersion.Core.Logging.Message
+
+let logger = Log.create "YoloDev.GitVersion.Core.DotNet.Types"
+
+[<AutoOpen>]
+module internal Helpers =
+
+  [<RequireQualifiedAccess>]
+  module IO =
+
+    let waitForFS =
+      Async.Sleep 3000 |> IO.ofAsync
 
 type CommitWrapper (commit: Commit) =
   
@@ -96,23 +109,28 @@ type RepositoryWrapper (repo: Repository, dispose: (unit -> unit) option) =
         fun () -> IO.unit (new BranchWrapper (repo.Head) :> IBranch)
     
     member __.Commit (message: string) =
-      IO.delay <|
-        fun () ->
-          printfn "Actually commit %s" message
-          let author = Signature ("Test", "@yolodev", DateTimeOffset.Now)
+      io {
+        do! logger.debugIO (
+              eventX "Commit {message}"
+              >> setField "message" message)
+        
+        let author = Signature ("Test", "@yolodev", DateTimeOffset.Now)
           
-          repo.Commit (message, author, author, CommitOptions (AllowEmptyCommit = true)) 
-          |> CommitWrapper.ofCommit
-          |> IO.unit
+        let commit = repo.Commit (message, author, author, CommitOptions (AllowEmptyCommit = true)) |> CommitWrapper.ofCommit
+        do! IO.waitForFS
+        return commit
+      }
     
     member __.Tag (name: string) =
-      IO.delay <|
-        fun () ->
-          printfn "Actually tag %s" name
-
-          repo.ApplyTag name
-          |> TagWrapper.ofTag
-          |> IO.unit
+      io {
+        do! logger.debugIO (
+              eventX "Tag {name}"
+              >> setField "name" name)
+        
+        let tag = repo.ApplyTag name |> TagWrapper.ofTag
+        do! IO.waitForFS
+        return tag
+      }
     
     member __.IsDirty =
       IO.delay <|

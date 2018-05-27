@@ -5,8 +5,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <None Include="paket.reference" />
     <Compile Include="program.fs" />
   </ItemGroup>
+
+  <ItemGroup />
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\core\YoloDev.GitVersion.Core\YoloDev.GitVersion.Core.fsproj" />

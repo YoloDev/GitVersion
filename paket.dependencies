@@ -9,3 +9,5 @@ nuget Fable.Core
 nuget Fable.Import.Node
 nuget Fable.PowerPack
 nuget LibGit2Sharp
+nuget Logary >= 5.0.0-beta.11
+nuget Logary.Adapters.Facade >= 5.0.0-beta.11

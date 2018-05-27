@@ -4,6 +4,7 @@
     <TargetFramework>netstandard2.0</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
+    <None Include="paket.references" />
     <Compile Include="semver.fs" />
     <Compile Include="helpers.fs" />
     <Compile Include="operators.fs" />

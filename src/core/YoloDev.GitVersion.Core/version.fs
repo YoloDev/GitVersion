@@ -3,56 +3,76 @@ module internal YoloDev.GitVersion.Core.Version
 
 open System.Text.RegularExpressions
 open YoloDev.GitVersion
+open YoloDev.GitVersion.Core.Logging.LoggerEx
+open YoloDev.GitVersion.Core.Logging.Message
+
+let logger = Logging.Log.create "YoloDev.GitVersion.Core.Version"
 
 type Branch =
-  | Master
-  | Branch of name: string
+  | DefaultBranch of name: string
+  | Branch of prefixSegments: string list * name: string
   | PullRequest of number: int
 
 [<RequireQualifiedAccess>]
 module Ci =
 
   let pullRequest =
-    let toPr = IO.map (Option.bind Int.tryParse >> Option.map PullRequest)
+    let fromEnv name =
+      io {
+        let! env = Env.getVar name
+        match env with
+        | None -> return None
+        | Some str ->
+          match Int.tryParse str with
+          | None -> return None
+          | Some n ->
+            do! logger.infoIO (
+                  eventX "Got pull request number {pr} from environment variable {env}" 
+                  >> setField "pr" n
+                  >> setField "env" name)
+            return Some (PullRequest n)
+      }
+
     IO.choose [
-      Env.getVar "APPVEYOR_PULL_REQUEST_NUMBER" |> toPr
-      Env.getVar "TRAVIS_PULL_REQUEST" |> toPr
+      fromEnv "GITVERSION_PULL_REQUEST"
+      fromEnv "APPVEYOR_PULL_REQUEST_NUMBER"
+      fromEnv "TRAVIS_PULL_REQUEST"
     ]
   
-  let branch =
-    let toBranch = IO.map (Option.map <| 
-                    function | "master" -> Master 
-                             | b -> Branch (Regex.replace "\\." "-" b))
+  //let branch =
+  //  let toBranch = IO.map (Option.map <| 
+  //                  function | "master" -> Master 
+  //                           | b -> Branch (Regex.replace "\\." "-" b))
 
-    IO.choose [
-      Env.getVar "APPVEYOR_REPO_BRANCH" |> toBranch
-      Env.getVar "TRAVIS_BRANCH" |> toBranch
-    ]
+  //  IO.choose [
+  //    Env.getVar "APPVEYOR_REPO_BRANCH" |> toBranch
+  //    Env.getVar "TRAVIS_BRANCH" |> toBranch
+  //  ]
 
-[<RequireQualifiedAccess>]
-module Repo =
+//[<RequireQualifiedAccess>]
+//module Repo =
 
-  let branchName repo =
-    let toBranch = IO.map (function | "master" -> Master 
-                                    | b -> Branch (Regex.replace "\\." "-" b))
+//  let branchName repo =
+//    let toBranch = IO.map (function | "master" -> DefaultBranch "master" 
+//                                    | b -> Branch ([], (Regex.replace "\\." "-" b)))
 
-    IO.choose [
-      Ci.pullRequest
-      Ci.branch
-    ] |> IO.bind (function
-      | Some branch -> IO.unit branch
-      | None ->
-        Repo.head repo
-        |> IO.bind Branch.name
-        |> toBranch)
+//    IO.choose [
+//      Ci.pullRequest
+//      //Ci.branch
+//    ] |> IO.bind (function
+//      | Some branch -> IO.unit branch
+//      | None ->
+//        Repo.head repo
+//        |> IO.bind Branch.name
+//        |> toBranch)
 
-[<RequireQualifiedAccess>]
-module Branch =
+//[<RequireQualifiedAccess>]
+//module Branch =
 
-  let distanceFromMaster repo =
-    Repo.commits repo
-    |> CommitLog.query (CommitFilter.revWalk |> CommitFilter.withExcludeReachableFromMaster)
-    |> IOSeq.count
+//  let distanceFromMaster repo =
+//    Repo.commits repo
+//    |> CommitLog.query (CommitFilter.revWalk |> CommitFilter.withExcludeReachableFromMaster)
+//    |> IOSeq.count
 
 [<RequireQualifiedAccess>]
 module Tag =
@@ -111,6 +131,7 @@ module SingleVersion =
 
   let versionInfo repo =
     io {
+      do! logger.verboseIO (eventX "Getting version info")
       let mutable tags = Map.empty
       for tag in Repo.tags repo do
         let! versionTag = Tag.singleVersionTag tag
@@ -119,6 +140,10 @@ module SingleVersion =
         | Some versionTag ->
           let! sha = Tag.hash tag
           let! name = Tag.name tag
+          do! logger.debugIO (
+                eventX "Found version tag {tag} at commit {sha}" 
+                >> setField "tag" name
+                >> setField "sha" sha)
           match Map.tryFind sha tags with
           | None          -> tags <- Map.add sha (versionTag.version, name) tags
           | Some version  -> 
@@ -147,6 +172,17 @@ module SingleVersion =
         |> Option.map (fun (v, t) -> Some v, Some t)
         |> Option.defaultValue (None, None)
       
+      match prevTag with
+      | None   ->
+        do! logger.verboseIO (
+              eventX "Found {commits} commits and no version tags with revwalk"
+              >> setField "commits" (Array.length commits))
+      | Some t ->
+        do! logger.verboseIO (
+              eventX "Found {commits} commits up to and including tag {tag} with revwalk"
+              >> setField "commits" (Array.length commits)
+              >> setField "tag" t)
+
       let skipCount =
         match prevTag with
         | None   -> 0
@@ -162,14 +198,23 @@ module SingleVersion =
           use commit = Option.get commitOpt
           let! msg = Commit.message commit
           match changeKind msg with
-          | Some c when c > change -> change <- c
-          | _                      -> ()
+          | Some c ->
+            let! sha = Commit.hash commit
+            do! logger.debugIO (
+                  eventX "Commit {commit} requests version change kind {change}"
+                  >> setField "commit" sha
+                  >> setField "change" c)
 
+            if c > change then change <- c
+
+          | _ -> ()
+
+      // TODO: Use branch name getter that looks at env vars etc.
       use! branch = Repo.head repo
       let! branchName = Branch.name branch
       let! dirty = Repo.isDirty repo
 
-      return
+      let status =
         { prevVersion = prevVersion
           prevTag = prevTag
           change = change
@@ -177,6 +222,12 @@ module SingleVersion =
           branch = branchName
           sha = Array.tryLast commits
           dirty = dirty }
+      
+      do! logger.infoIO (
+            eventX "Repo info processed {info}"
+            >> setField "info" status)
+      
+      return status
     }
 
 // [<RequireQualifiedAccess>]

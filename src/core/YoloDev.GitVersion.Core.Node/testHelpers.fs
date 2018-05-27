@@ -3,11 +3,15 @@ module YoloDev.GitVersion.Core.TestHelpers
 open YoloDev.GitVersion.Core.Node.Shim
 open YoloDev.GitVersion.Core.Node.Types
 open YoloDev.GitVersion
+open YoloDev.GitVersion.Core.Logging
+open YoloDev.GitVersion.Core.Logging.Message
 open YoloDev.GitVersion.Core.Abstractions
 open Fable.Core
 open Fable.PowerPack
 open Fable.Import.Node
 open Bindings.NodeGit
+
+let logger = Log.create "YoloDev.GitVersion.Core.TestHelpers"
 
 [<RequireQualifiedAccess>]
 module internal Helpers =
@@ -38,6 +42,10 @@ module Repo =
         Helpers.mkTmpDir ()
         |> Promise.bind (fun path ->
           nodegit.Repository.init path (0 (* false *))
-          |> Promise.map (fun r -> new Node.Shim.Repository (r))          
+          |> Promise.map (fun r -> 
+            logger.verbose (
+              eventX "Created test repository at {path}"
+              >> setField "path" path)
+            new Node.Shim.Repository (r))          
           |> Promise.map (fun repo -> new RepositoryWrapper (repo, Helpers.postDelete path) :> IRepository))
     |> IO.bind Repo.from

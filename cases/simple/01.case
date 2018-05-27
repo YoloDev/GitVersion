@@ -18,6 +18,6 @@ expect 0.2.1-ci.1
 commit "Semver: minor"
 expect 0.3.0-ci.2
 commit "Semver: major"
-expect 1.0.0-ci.4
+expect 1.0.0-ci.3
 release
 expect 1.0.0

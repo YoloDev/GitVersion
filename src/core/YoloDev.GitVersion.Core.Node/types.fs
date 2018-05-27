@@ -3,7 +3,11 @@ module internal YoloDev.GitVersion.Core.Node.Types
 open System
 open YoloDev.GitVersion.Core.Node.Shim
 open YoloDev.GitVersion.Core.Abstractions
+open YoloDev.GitVersion.Core.Logging
+open YoloDev.GitVersion.Core.Logging.Message
 open YoloDev.GitVersion.SystemBuilders
+
+let logger = Log.create "YoloDev.GitVersion.Core.Node.Types"
 
 [<AutoOpen>]
 module private Helpers =
@@ -93,17 +97,21 @@ type RepositoryWrapper (repo: Repository, dispose: (unit -> unit) option) =
       |> IO.map (fun head -> new BranchWrapper (head) :> IBranch)
     
     member __.Commit (message: string) =
-      IO.delay <|
-        fun () ->
-          printfn "Actually commit %s" message
-          let author = { Signature.name = "Test"; email = "test@yolodev" }
+      io {
+        do! logger.debugIO (
+              eventX "Commit {message}"
+              >> setField "message" message)
+        let author = { Signature.name = "Test"; email = "test@yolodev" }
           
-          repo.Commit (message, author, author) 
-          |> IO.map CommitWrapper.ofCommit
+        let! commit = repo.Commit (message, author, author)
+        return CommitWrapper.ofCommit commit
+      }
     
     member __.Tag (name: string) =
       io {
-        printfn "Actually tag %s" name
+        do! logger.debugIO (
+              eventX "Tag {name}"
+              >> setField "name" name)
 
         let! tag = repo.ApplyTag name
         return TagWrapper.ofTag tag

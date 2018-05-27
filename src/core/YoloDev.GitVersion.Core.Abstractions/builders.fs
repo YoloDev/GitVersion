@@ -67,6 +67,17 @@ module IO =
       | Error e -> cont (Error e)
     
     fork ma sys cont'
+ 
+  let catchBind (f: exn -> IO<'a>) ma = IO <| fun sys cont ->
+    let cont' ra =
+      match ra with
+      | Ok a    -> cont (Ok a)
+      | Error e ->
+        match Result.attempt f e with
+        | Ok me   -> fork me sys cont
+        | Error e -> cont (Error e)
+    
+    fork ma sys cont'
   
   let using f (d: #System.IDisposable) = tryFinally (fun () -> d.Dispose ()) (f d)
 
@@ -112,6 +123,14 @@ module IO =
   
   let foreach f s =
     Seq.fold (fun state t -> combine state (delay (fun () -> f t))) zero s
+ 
+  let ofAsync (a: Async<_>) =
+    IO <| fun _ cont ->
+      Async.StartWithContinuations (a, 
+        Ok >> cont >> ignore, // If OK
+        Error >> cont >> ignore, // If errored
+        unbox >> Error >> cont >> ignore) // If cancelled (treat as error)
+      FakeUnit
 
 // TODO: There are likley A LOT of places where
 // errors can fall through here :(
@@ -225,14 +244,16 @@ module IOSeq =
   let takeUntilIncludingM f ma = IOSeq <| fun sys next cont ->
     let mutable matched = false
     let next' a cont' =
-      IO.fork (f a) sys <|
-        function
-        | Ok false -> next a cont'
-        | Ok true when not matched ->
-          matched <- true
-          next a cont'
-        | Ok true -> cont' (Ok false)
-        | Error e -> cont' (Error e)
+      if matched
+      then cont' (Ok false)
+      else 
+        IO.fork (f a) sys <|
+          function
+          | Ok false -> next a cont'
+          | Ok true  ->
+            matched <- true
+            next a cont'
+          | Error e -> cont' (Error e)
     
     forkSeq ma sys next' cont
   
@@ -334,6 +355,7 @@ module Builders =
     member inline __.For (s, f: _ -> #IO<unit>) = IOSeq.mapM f s |> IO.map ignore
     member inline __.Combine (ma, mb) = IO.combine ma mb
     member inline __.TryFinally (ma, f) = IO.tryFinally f ma
+    member inline __.TryWith (ma, f) = IO.catchBind f ma
     member inline __.Using (r, f) = IO.using f r
   
   type IOSeqBuilder () =
@@ -350,3 +372,13 @@ module Builders =
 
 let io = Builders.IOBuilder ()
 let ioSeq = Builders.IOSeqBuilder ()
+
+open YoloDev.GitVersion.Core.Logging
+
+type Logger with
+  member l.verboseIO = l.verboseWithBP >> IO.ofAsync
+  member l.debugIO = l.debugWithBP >> IO.ofAsync
+  member l.infoIO = l.infoWithBP >> IO.ofAsync
+  member l.warnIO = l.warnWithBP >> IO.ofAsync
+  member l.errorIO = l.errorWithBP >> IO.ofAsync
+  member l.fatalIO = l.fatalWithBP >> IO.ofAsync
