@@ -12,7 +12,7 @@ open YoloDev.GitVersion.Core
 open Fable.Core
 #endif
 
-let logger = Logging.Log.create "YoloDev.GitVersion.Semver"
+let logger = Logger.create "YoloDev.GitVersion.Semver"
 
 [<AutoOpen>]
 module private Helpers =

@@ -3,10 +3,8 @@ module internal YoloDev.GitVersion.Core.Version
 
 open System.Text.RegularExpressions
 open YoloDev.GitVersion
-open YoloDev.GitVersion.Core.Logging.LoggerEx
-open YoloDev.GitVersion.Core.Logging.Message
 
-let logger = Logging.Log.create "YoloDev.GitVersion.Core.Version"
+let logger = Logger.create "YoloDev.GitVersion.Core.Version"
 
 type Branch =
   | DefaultBranch of name: string
@@ -26,7 +24,7 @@ module Ci =
           match Int.tryParse str with
           | None -> return None
           | Some n ->
-            do! logger.infoIO (
+            do! Logger.info logger (
                   eventX "Got pull request number {pr} from environment variable {env}" 
                   >> setField "pr" n
                   >> setField "env" name)
@@ -131,7 +129,7 @@ module SingleVersion =
 
   let versionInfo repo =
     io {
-      do! logger.verboseIO (eventX "Getting version info")
+      do! Logger.verbose logger (eventX "Getting version info")
       let mutable tags = Map.empty
       for tag in Repo.tags repo do
         let! versionTag = Tag.singleVersionTag tag
@@ -140,7 +138,7 @@ module SingleVersion =
         | Some versionTag ->
           let! sha = Tag.hash tag
           let! name = Tag.name tag
-          do! logger.debugIO (
+          do! Logger.debug logger (
                 eventX "Found version tag {tag} at commit {sha}" 
                 >> setField "tag" name
                 >> setField "sha" sha)
@@ -174,11 +172,11 @@ module SingleVersion =
       
       match prevTag with
       | None   ->
-        do! logger.verboseIO (
+        do! Logger.verbose logger (
               eventX "Found {commits} commits and no version tags with revwalk"
               >> setField "commits" (Array.length commits))
       | Some t ->
-        do! logger.verboseIO (
+        do! Logger.verbose logger (
               eventX "Found {commits} commits up to and including tag {tag} with revwalk"
               >> setField "commits" (Array.length commits)
               >> setField "tag" t)
@@ -200,7 +198,7 @@ module SingleVersion =
           match changeKind msg with
           | Some c ->
             let! sha = Commit.hash commit
-            do! logger.debugIO (
+            do! Logger.debug logger (
                   eventX "Commit {commit} requests version change kind {change}"
                   >> setField "commit" sha
                   >> setField "change" c)
@@ -223,7 +221,7 @@ module SingleVersion =
           sha = Array.tryLast commits
           dirty = dirty }
       
-      do! logger.infoIO (
+      do! Logger.info logger (
             eventX "Repo info processed {info}"
             >> setField "info" status)
       

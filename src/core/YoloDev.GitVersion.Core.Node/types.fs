@@ -98,7 +98,7 @@ type RepositoryWrapper (repo: Repository, dispose: (unit -> unit) option) =
     
     member __.Commit (message: string) =
       io {
-        do! logger.debugIO (
+        do! Logger.debug logger (
               eventX "Commit {message}"
               >> setField "message" message)
         let author = { Signature.name = "Test"; email = "test@yolodev" }
@@ -109,7 +109,7 @@ type RepositoryWrapper (repo: Repository, dispose: (unit -> unit) option) =
     
     member __.Tag (name: string) =
       io {
-        do! logger.debugIO (
+        do! Logger.debug logger (
               eventX "Tag {name}"
               >> setField "name" name)
 

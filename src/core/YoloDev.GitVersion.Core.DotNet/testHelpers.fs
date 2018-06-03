@@ -6,9 +6,8 @@ open YoloDev.GitVersion
 open YoloDev.GitVersion.Core.Abstractions
 open YoloDev.GitVersion.Core.DotNet.Types
 open YoloDev.GitVersion.Core.Logging
-open YoloDev.GitVersion.Core.Logging.Message
 
-let logger = Log.create "YoloDev.GitVersion.Core.TestHelpers"
+let logger = Logger.create "YoloDev.GitVersion.Core.TestHelpers"
 
 [<RequireQualifiedAccess>]
 module internal Helpers =
@@ -26,19 +25,19 @@ module Repo =
       let dir = Helpers.mkTmpDir ()
       let p = Repository.Init dir.FullName
       let repo = new Repository (p)
-      do! logger.verboseIO (
+      do! Logger.verbose logger (
             eventX "Created test repository at {path}"
             >> setField "path" dir.FullName)
       
       let cleanup () =
         io {
           do! IO.waitForFS
-          do! logger.verboseIO (
+          do! Logger.verbose logger (
                 eventX "Delete directory {path}"
                 >> setField "path" dir.FullName)
           try dir.Delete true
           with e ->
-            do! logger.infoIO (
+            do! Logger.verbose logger (
                   eventX "Failed to delete directory {path}"
                   >> setField "path" dir.FullName
                   >> addExn e)

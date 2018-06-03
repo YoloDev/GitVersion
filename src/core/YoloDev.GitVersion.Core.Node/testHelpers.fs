@@ -43,7 +43,7 @@ module Repo =
         |> Promise.bind (fun path ->
           nodegit.Repository.init path (0 (* false *))
           |> Promise.map (fun r -> 
-            logger.verbose (
+            Logger.verbose logger (
               eventX "Created test repository at {path}"
               >> setField "path" path)
             new Node.Shim.Repository (r))          

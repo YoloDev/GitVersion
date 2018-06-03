@@ -8,14 +8,14 @@ open Logary.Targets
 open Logary.Adapters.Facade
 
 [<EntryPoint>]
-let main argv =
+let main _argv =
   let logary =
     Config.create "YoloDev.GitVersion.Test" "localhost"
     |> Config.target (LiterateConsole.create LiterateConsole.empty "console")
     |> Config.loggerMinLevel "YoloDev.*" Logary.LogLevel.Verbose
     |> Config.buildAndRun
   
-  LogaryFacadeAdapter.initialise<YoloDev.GitVersion.Core.Logging.Logger> logary
+  LogaryFacadeAdapter.initialise<YoloDev.GitVersion.Logary.Facade.Logger> logary
 
   let test = 
     System.IO.File.ReadAllLines "cases/simple/01.case"

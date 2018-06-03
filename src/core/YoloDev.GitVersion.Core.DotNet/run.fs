@@ -17,6 +17,9 @@ type private SystemImpl =
     
     member __.OpenRepository p = IO.delay <| fun () ->
       IO.unit (new RepositoryWrapper (new Repository (p)) :> IRepository)
+    
+    member __.GetLogger name = IO.delay <| fun () ->
+      IO.unit (new LoggerWrapper (Logary.Facade.Log.create name) :> ILogger)
 
 [<RequireQualifiedAccess>]
 module IO =

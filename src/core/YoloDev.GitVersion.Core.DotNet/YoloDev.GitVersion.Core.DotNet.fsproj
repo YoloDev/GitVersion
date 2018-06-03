@@ -5,6 +5,7 @@
   </PropertyGroup>
   <ItemGroup>
     <None Include="paket.references" />
+    <Compile Include="logging.fs" />
     <Compile Include="types.fs" />
     <Compile Include="run.fs" />
     <Compile Include="testHelpers.fs" />

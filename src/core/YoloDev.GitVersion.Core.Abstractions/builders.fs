@@ -372,13 +372,3 @@ module Builders =
 
 let io = Builders.IOBuilder ()
 let ioSeq = Builders.IOSeqBuilder ()
-
-open YoloDev.GitVersion.Core.Logging
-
-type Logger with
-  member l.verboseIO = l.verboseWithBP >> IO.ofAsync
-  member l.debugIO = l.debugWithBP >> IO.ofAsync
-  member l.infoIO = l.infoWithBP >> IO.ofAsync
-  member l.warnIO = l.warnWithBP >> IO.ofAsync
-  member l.errorIO = l.errorWithBP >> IO.ofAsync
-  member l.fatalIO = l.fatalWithBP >> IO.ofAsync

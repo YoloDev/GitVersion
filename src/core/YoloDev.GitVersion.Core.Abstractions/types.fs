@@ -31,8 +31,36 @@ type
   internal 
   #endif 
   ISystem =
+    abstract member GetLogger: string -> IO<ILogger>
     abstract member GetEnv: string -> IO<string option>
     abstract member OpenRepository: string -> IO<IRepository>
+
+type
+  #if !NODE
+  internal
+  #endif
+  ILogMessageFactory =
+    abstract member Event: string -> ILogMessage
+
+type
+  #if !NODE
+  internal
+  #endif
+  ILogMessage =
+    abstract member SetField: string -> obj -> ILogMessage
+    abstract member AddExn: #exn -> ILogMessage
+
+type
+  #if !NODE
+  internal
+  #endif
+  ILogger =
+    abstract member LogVerbose: (ILogMessageFactory -> ILogMessage) -> IO<unit>
+    abstract member LogDebug: (ILogMessageFactory -> ILogMessage) -> IO<unit>
+    abstract member LogInfo: (ILogMessageFactory -> ILogMessage) -> IO<unit>
+    abstract member LogWarn: (ILogMessageFactory -> ILogMessage) -> IO<unit>
+    abstract member LogError: (ILogMessageFactory -> ILogMessage) -> IO<unit>
+    abstract member LogFatal: (ILogMessageFactory -> ILogMessage) -> IO<unit>
 
 type 
   #if !NODE

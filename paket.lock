@@ -543,3 +543,6 @@ NUGET
       System.Threading (>= 4.3)
       System.Xml.ReaderWriter (>= 4.3)
       System.Xml.XmlDocument (>= 4.3)
+GITHUB
+  remote: logary/logary
+    src/Logary.Facade/Facade.fs (ead3d8c138bc05cc6ef2e6405a78434e563b390c)

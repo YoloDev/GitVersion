@@ -5,9 +5,9 @@ open LibGit2Sharp
 open YoloDev.GitVersion.Core.Abstractions
 open YoloDev.GitVersion.SystemBuilders
 open YoloDev.GitVersion.Core.Logging
-open YoloDev.GitVersion.Core.Logging.Message
+open YoloDev.GitVersion.Logary.Facade
 
-let logger = Log.create "YoloDev.GitVersion.Core.DotNet.Types"
+let logger = Logger.create "YoloDev.GitVersion.Core.DotNet.Types"
 
 [<AutoOpen>]
 module internal Helpers =
@@ -17,6 +17,14 @@ module internal Helpers =
 
     let waitForFS =
       Async.Sleep 3000 |> IO.ofAsync
+    
+    let ofJob job = IO <| fun _ cont ->
+      let ok = Result.Ok >> cont >> ignore
+      let error = Result.Error >> cont >> ignore
+      let cancelled = Result.Error >> cont >> ignore
+      Async.StartWithContinuations (job, ok, error, cancelled)
+      // startWithActions (Result.Error >> cont >> ignore) (Result.Ok >> cont >> ignore) job
+      FakeUnit
 
 type CommitWrapper (commit: Commit) =
   
@@ -110,7 +118,7 @@ type RepositoryWrapper (repo: Repository, dispose: (unit -> unit) option) =
     
     member __.Commit (message: string) =
       io {
-        do! logger.debugIO (
+        do! Logger.debug logger (
               eventX "Commit {message}"
               >> setField "message" message)
         
@@ -123,7 +131,7 @@ type RepositoryWrapper (repo: Repository, dispose: (unit -> unit) option) =
     
     member __.Tag (name: string) =
       io {
-        do! logger.debugIO (
+        do! Logger.debug logger (
               eventX "Tag {name}"
               >> setField "name" name)
         
@@ -144,3 +152,57 @@ type RepositoryWrapper (repo: Repository, dispose: (unit -> unit) option) =
       match dispose with
       | Some d -> d ()
       | _      -> ()
+
+type LogMessageWrapper (msg: LogLevel -> Message) =
+
+  member __.Message = msg
+
+  interface ILogMessage with
+    member __.SetField n v =
+      LogMessageWrapper (msg >> Message.setField n v)
+      :> ILogMessage
+    
+    member __.AddExn e =
+      LogMessageWrapper (msg >> Message.addExn e)
+      :> ILogMessage
+
+type LoggerWrapper (logger: Logger) =
+
+  let factory =
+    { new ILogMessageFactory with
+      member __.Event s =
+        LogMessageWrapper (Message.eventX s)
+        :> ILogMessage }
+  
+  let createMessage (f: ILogMessageFactory -> ILogMessage) =
+    match f factory with
+    | :? LogMessageWrapper as wrapper ->
+      wrapper.Message
+    | _ -> failwithf "Invalid message factory provided"
+  
+  interface ILogger with
+    member __.LogVerbose f = 
+      logger.verboseWithBP (createMessage f)
+      |> IO.ofJob
+    
+    member __.LogDebug f =
+      logger.debugWithBP (createMessage f)
+      |> IO.ofJob
+    
+    member __.LogInfo f =
+      logger.infoWithBP (createMessage f)
+      |> IO.ofJob
+    
+    member __.LogWarn f =
+      logger.warnWithBP (createMessage f)
+      |> IO.ofJob
+    
+
+    member __.LogError f =
+      logger.warnWithBP (createMessage f)
+      |> IO.ofJob
+    
+    member __.LogFatal f =
+      logger.fatalWithBP (createMessage f)
+      |> IO.ofJob
+      

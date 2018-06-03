@@ -5,9 +5,9 @@
   </PropertyGroup>
   <ItemGroup>
     <None Include="paket.references" />
-    <Compile Include="logging.fs" />
     <Compile Include="types.fs" />
     <Compile Include="builders.fs" />
+    <Compile Include="logging.fs" />
     <Compile Include="env.fs" />
     <Compile Include="git.fs" />
   </ItemGroup>

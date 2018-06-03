@@ -65,7 +65,7 @@ module internal Helpers =
   module IO =
     let ofPromiseFactory f = IO <| fun _ cont ->
       f ()
-      |> Promise.eitherEnd (Ok >> cont >> ignore) (Error >> cont >> ignore)
+      |> Promise.eitherEnd (Ok >> cont >> ignore) (Result.Error >> cont >> ignore)
       FakeUnit
   
   // Note, this code get's compiled to JS, so this completely
@@ -412,7 +412,7 @@ type Repository internal (repo: NodeGit.Repository) as this =
       match tip with
       | None -> return failwith "Head has no commits"
       | Some commit ->
-        do! logger.debugIO (
+        do! Logger.debug logger (
               eventX "Tag {commit} with {name}"
               >> setField "commit" commit.Sha
               >> setField "name" name)
@@ -732,7 +732,7 @@ type ReferenceCollection internal (repo: Repository) =
     else
       IO.ofPromiseFactory (fun () -> NodeGit.nodegit.Reference.lookupS repo.Repo name)
       |> IO.toResult
-      |> IO.map (function | Ok r -> Some r | Error _ -> None)
+      |> IO.map (function | Ok r -> Some r | Result.Error _ -> None)
       |> IO.bind (function | None -> IO.unit None | Some r -> Reference.ofReference repo r |> IO.map Some)
 
 type TagCollection internal (repo: Repository) =
