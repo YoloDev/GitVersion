@@ -188,7 +188,7 @@ module SingleVersion =
 
       let changeKind = Commit.semverMessage "Semver"
       let mutable change = Change.Patch
-      for commitSha in Seq.safeSkip skipCount commits do
+      for commitSha in IOSeq.coerce (Seq.safeSkip skipCount commits) do
         if change = Change.Major
         then ()
         else

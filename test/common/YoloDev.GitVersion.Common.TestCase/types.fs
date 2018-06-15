@@ -126,7 +126,7 @@ module TestCase =
             eventX "Starting test case {case}"
             >> setField "case" case.name)
 
-      for index, step in Seq.indexed case.steps do
+      for index, step in IOSeq.coerce (Seq.indexed case.steps) do
         do! Logger.info logger (
               eventX "Evaluate {step}"
               >> setField "step" step)

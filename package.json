@@ -10,6 +10,6 @@
   },
   "dependencies": {
     "nodegit": "^0.22.1",
-    "winston": "^3.0.0-rc6"
+    "winston": "^3.0.0"
   }
 }

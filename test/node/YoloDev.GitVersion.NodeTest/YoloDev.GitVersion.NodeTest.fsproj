@@ -1,20 +1,16 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
-
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
   </PropertyGroup>
-
   <ItemGroup>
     <None Include="paket.reference" />
     <Compile Include="program.fs" />
   </ItemGroup>
-
-  <ItemGroup />
-
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\core\YoloDev.GitVersion.Core\YoloDev.GitVersion.Core.fsproj" />
     <ProjectReference Include="..\..\..\src\core\YoloDev.GitVersion.Core.Node\YoloDev.GitVersion.Core.Node.fsproj" />
     <ProjectReference Include="..\..\common\YoloDev.GitVersion.Common.TestCase\YoloDev.GitVersion.Common.TestCase.fsproj" />
   </ItemGroup>
-
+  <Import Project="..\..\..\.paket\Paket.Restore.targets" />
 </Project>

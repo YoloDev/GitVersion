@@ -340,35 +340,44 @@ module IOSeq =
       | Ok true  -> forkSeq mb sys next cont
     
     forkSeq ma sys next cont'
+  
+  let inline coerce s =
+    #if NODE
+    ofSeq s
+    #else
+    s
+    #endif
 
 
 [<RequireQualifiedAccess>]
 module Builders =
 
   type IOBuilder () =
-    member inline __.Delay f = IO.delay f
-    member inline __.Zero () = IO.zero
-    member inline __.Return x = IO.unit x
-    member inline __.ReturnFrom (ma: #IO<_>) = ma
-    member inline __.Bind (ma, f) = IO.bind f ma
-    member inline __.For (s, f) = IO.foreach f s
-    member inline __.For (s, f: _ -> #IO<unit>) = IOSeq.mapM f s |> IO.map ignore
-    member inline __.Combine (ma, mb) = IO.combine ma mb
-    member inline __.TryFinally (ma, f) = IO.tryFinally f ma
-    member inline __.TryWith (ma, f) = IO.catchBind f ma
-    member inline __.Using (r, f) = IO.using f r
+    member __.Delay f = IO.delay f
+    member __.Zero () = IO.zero
+    member __.Return x = IO.unit x
+    member __.ReturnFrom (ma: #IO<_>) = ma
+    member __.Bind (ma, f) = IO.bind f ma
+    #if !NODE
+    member __.For (s, f) = IO.foreach f s
+    #endif
+    member __.For (s, f: _ -> #IO<unit>) = IOSeq.mapM f s |> IO.map ignore
+    member __.Combine (ma, mb) = IO.combine ma mb
+    member __.TryFinally (ma, f) = IO.tryFinally f ma
+    member __.TryWith (ma, f) = IO.catchBind f ma
+    member __.Using (r, f) = IO.using f r
   
   type IOSeqBuilder () =
-    member inline __.Delay f = IOSeq.delay f
-    member inline __.Zero () = IOSeq.empty
-    member inline __.Yield x = IOSeq.singleton x
-    member inline __.YieldFrom (ma: #IOSeq<_>) = ma
-    member inline __.TryFinally (ma, f) = IOSeq.tryFinally f ma
-    member inline __.TryWith (ma, f) = IOSeq.catchBind f ma
-    member inline __.Bind (ma, f) = IOSeq.bindIO f ma
-    member inline __.While (f, ma) = IOSeq.doWhile f ma
-    member inline __.For (s, f) = IOSeq.foreach f s
-    member inline __.Combine (ma, mb) = IOSeq.concat ma mb
+    member __.Delay f = IOSeq.delay f
+    member __.Zero () = IOSeq.empty
+    member __.Yield x = IOSeq.singleton x
+    member __.YieldFrom (ma: #IOSeq<_>) = ma
+    member __.TryFinally (ma, f) = IOSeq.tryFinally f ma
+    member __.TryWith (ma, f) = IOSeq.catchBind f ma
+    member __.Bind (ma, f) = IOSeq.bindIO f ma
+    member __.While (f, ma) = IOSeq.doWhile f ma
+    member __.For (s, f) = IOSeq.foreach f s
+    member __.Combine (ma, mb) = IOSeq.concat ma mb
 
 let io = Builders.IOBuilder ()
 let ioSeq = Builders.IOSeqBuilder ()

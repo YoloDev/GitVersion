@@ -5,7 +5,6 @@ open YoloDev.GitVersion.Core.Abstractions
 open YoloDev.GitVersion.SystemBuilders
 open YoloDev.GitVersion.Core.Git
 open YoloDev.GitVersion.Core.Logging
-open YoloDev.GitVersion.Core.Logging.Message
 open Bindings
 open Fable.Core
 open Fable.Import
@@ -14,7 +13,7 @@ open Fable
 open Bindings.NodeGit
 open System.Security.Cryptography
 
-let logger = Log.create "YoloDev.GitVersion.Core.Node.Shim"
+let logger = Logger.create "YoloDev.GitVersion.Core.Node.Shim"
 
 [<AutoOpen>]
 module internal Helpers =
