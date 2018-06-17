@@ -32,7 +32,13 @@ module internal Helpers =
       fs.rmdirSync (U2.Case1 dir)
 
   let postDelete path =
-    fun () -> deleteDirRec path
+    fun () -> 
+      deleteDirRec path
+      Logger.verbose logger (
+              eventX "Deleted test repository at {path}"
+              >> setField "path" path)
+      |> IO.run
+      |> Promise.start
 
 [<RequireQualifiedAccess>]
 module Repo =

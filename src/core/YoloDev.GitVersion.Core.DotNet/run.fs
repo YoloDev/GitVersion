@@ -20,6 +20,15 @@ type private SystemImpl =
     
     member __.GetLogger name = IO.delay <| fun () ->
       IO.unit (new LoggerWrapper (Logary.Facade.Log.create name) :> ILogger)
+    
+    member __.GetDir path = 
+      let dir = System.IO.DirectoryInfo path
+      if not dir.Exists
+      then failwithf "Path %s does not exist or is not a dir" path
+
+      FsDirWrapper dir
+      :> IDirectory
+      |> IO.unit
 
 [<RequireQualifiedAccess>]
 module IO =

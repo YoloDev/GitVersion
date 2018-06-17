@@ -40,8 +40,9 @@ module Version =
         | "master" -> return { nextFullVersion with pre = [Str "ci"; Num n ] }
         // TODO: This *needs* to be improved
         | branch   -> 
-          let shaStr = info.sha |> Option.map Hash.string |> Option.defaultValue "EMPTY"
-          let pre = [Str branch; Num n]
+          let shaStr = info.sha |> Option.map Hash.string7 |> Option.defaultValue "EMPTY"
+          let branchPart = branch.Split [|'/'|] |> Seq.last
+          let pre = [Str branchPart; Num n]
           let build = 
             if info.dirty 
             then [Str shaStr; Str "DIRTY"]

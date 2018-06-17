@@ -27,7 +27,7 @@ export default [
       fable({ babel: babelOptions, define: ['NODE'] }),
       prettier({ tabWidth: 2, singleQuote: false }),
     ],
-    external: ['nodegit', 'fs', 'path', 'os', 'winston'],
+    external: ['nodegit', 'fs', 'path', 'os', 'winston', 'chalk'],
   },*/
   {
     input: path.resolve(
@@ -48,6 +48,6 @@ export default [
       fable({ babel: babelOptions, define: ['NODE'] }),
       prettier({ tabWidth: 2, singleQuote: false }),
     ],
-    external: ['nodegit', 'fs', 'path', 'os', 'winston'],
+    external: ['nodegit', 'fs', 'path', 'os', 'winston', 'chalk'],
   },
 ];

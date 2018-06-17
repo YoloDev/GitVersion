@@ -376,8 +376,12 @@ module Builders =
     member __.TryWith (ma, f) = IOSeq.catchBind f ma
     member __.Bind (ma, f) = IOSeq.bindIO f ma
     member __.While (f, ma) = IOSeq.doWhile f ma
+    #if !NODE
     member __.For (s, f) = IOSeq.foreach f s
+    #endif
+    member __.For (s, f) = IOSeq.collect f s
     member __.Combine (ma, mb) = IOSeq.concat ma mb
+    member __.Using (r, f) = IOSeq.using f r
 
 let io = Builders.IOBuilder ()
 let ioSeq = Builders.IOSeqBuilder ()

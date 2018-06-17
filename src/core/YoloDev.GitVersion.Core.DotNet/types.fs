@@ -59,6 +59,8 @@ module TagWrapper =
 
 type BranchWrapper (branch: Branch) =
 
+  member internal __.Branch = branch
+
   interface IBranch with
     member __.Name = IO.unit branch.FriendlyName
     member __.Tip = 
@@ -69,6 +71,11 @@ type BranchWrapper (branch: Branch) =
   
   interface IDisposable with
     member __.Dispose () = ()
+
+[<RequireQualifiedAccess>]
+module BranchWrapper =
+
+  let ofBranch branch = new BranchWrapper (branch) :> IBranch
 
 type CommitLogWrapper (repo: Repository, commitLog: IQueryableCommitLog) =
 
@@ -145,6 +152,24 @@ type RepositoryWrapper (repo: Repository, dispose: (unit -> unit) option) =
         fun () ->
           let status = repo.RetrieveStatus ()
           IO.unit status.IsDirty
+    
+    member __.CreateBranch name =
+      io {
+        let branch = repo.CreateBranch name
+
+        return BranchWrapper.ofBranch branch
+      }
+    
+    member __.Checkout branch =
+      let branch =
+        match branch with
+        | :? BranchWrapper as b -> b.Branch
+        | _ -> failwithf "Invalid branch type used"
+      
+      io {
+        Commands.Checkout (repo, branch)
+        |> ignore
+      }
 
   interface IDisposable with
     member __.Dispose () = 
@@ -205,4 +230,57 @@ type LoggerWrapper (logger: Logger) =
     member __.LogFatal f =
       logger.fatalWithBP (createMessage f)
       |> IO.ofJob
+
+open System.IO
+type FsEntryWrapper internal (entry: FileSystemInfo) =
+
+  interface IFileSystemEntry with
+    member __.Path = entry.FullName
+    member __.Name = entry.Name
+    member __.IsDirectory = entry :? DirectoryInfo
+    member __.IsFile = entry :? FileInfo
+
+type FsFileWrapper internal (file: FileInfo) =
+  inherit FsEntryWrapper (file)
+
+  interface IFile with
+    member __.Read () =
+      let read =
+        async {
+          use fs = File.OpenRead file.FullName
+          use reader = new StreamReader (fs)
+          return! Async.AwaitTask (reader.ReadToEndAsync ())
+        }
       
+      IO.ofAsync read
+
+type FsDirWrapper internal (dir: DirectoryInfo) =
+  inherit FsEntryWrapper (dir)
+
+  let entries =
+    ioSeq {
+      for entry in dir.EnumerateFileSystemInfos () do
+        match entry with
+        | :? FileInfo as f      -> yield FsFileWrapper f :> IFileSystemEntry
+        | :? DirectoryInfo as d -> yield FsDirWrapper d  :> IFileSystemEntry
+        | _                     -> () 
+    }
+  
+  interface IDirectory with
+    member __.Entries = entries
+    
+    member __.Dirs = 
+      ioSeq {
+        for entry in entries do
+          match entry with
+          | :? IDirectory as d -> yield d
+          | _ -> ()
+      }
+    
+    member __.Files =
+      ioSeq {
+        for entry in entries do
+          match entry with
+          | :? IFile as f -> yield f
+          | _ -> ()
+      }

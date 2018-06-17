@@ -12,6 +12,7 @@ open Fable.PowerPack
 open Fable
 open Bindings.NodeGit
 open System.Security.Cryptography
+open Fable
 
 let logger = Logger.create "YoloDev.GitVersion.Core.Node.Shim"
 
@@ -67,6 +68,18 @@ module internal Helpers =
       |> Promise.eitherEnd (Ok >> cont >> ignore) (Result.Error >> cont >> ignore)
       FakeUnit
   
+  [<RequireQualifiedAccess>]
+  module IOSeq =
+    let ofSeqPromiseFactory f = IOSeq <| fun sys next cont ->
+      promise {
+        try
+          let! collection = f ()
+          let s = IOSeq.ofSeq collection
+          IOSeq.forkSeq s sys next cont
+          |> ignore
+        with e -> cont (Error e) |> ignore } |> Promise.start
+      FakeUnit
+
   // Note, this code get's compiled to JS, so this completely
   // ignores thread safety
   type LazyGitRef<'t>(io: IO<'t option>, free: 't -> unit) =
@@ -226,6 +239,66 @@ module RepositoryExtensions =
             then IO.unit (Some tip.Value.Id)
             else IO.unit None))
       | _ -> IO.unit None
+    
+    member r.CreateBranch (branchName: string) =
+      io {
+        debugger ()
+        let! head = r.Head
+        let! reflogName =
+          match head with
+          | :? DetachedHead -> io {
+              let! commit = head.Tip
+              return (Option.get commit).Sha
+            }
+          | _ -> IO.unit head.FriendlyName
+        
+        return! r.CreateBranch (branchName, reflogName)
+      }
+    
+    member r.CreateBranch (branchName: string, committish: string) =
+      (r.Branches :> BranchCollection).Add (branchName, committish)
+
+type Commands private () =
+
+  static member Checkout (repo: Repository, branch: Branch) =
+    Commands.Checkout (repo, branch, CheckoutOptions.defaultOptions)
+  
+  static member Checkout (repo: Repository, branch: Branch, options: CheckoutOptions) =
+    let (&&=>) ma mb = IO.bind (fun a -> if a then mb else IO.unit a) ma
+    io {
+      // Make sure this is not an unborn branch.
+      let! tip = branch.Tip
+      let tip =
+        match tip with
+        | Some tip -> tip
+        | None -> failwithf "The tip of branch '%s' is null. There's nothing to checkout." branch.FriendlyName
+
+      let refTargetIdEqSha =
+        io {
+          let! ref = (repo.Refs :> ReferenceCollection).Get branch.CanonicalName
+          let ref = Option.get ref
+          return System.String.Equals (ref.TargetIdentifier, tip.Id.Sha, StringComparison.OrdinalIgnoreCase)
+        }
+
+      let! test =
+        IO.unit (not branch.IsRemote && not (branch :? DetachedHead))
+        &&=> refTargetIdEqSha
+      
+      let! tree = tip.Tree
+      debugger ()
+      if test
+      then do! Commands.Checkout (repo, tree, options, branch.CanonicalName)
+      else do! Commands.Checkout (repo, tree, options, tip.Id.Sha)
+
+      return! repo.Head
+    }
+  
+  static member Checkout (repo: Repository, tree: Tree, checkoutOptions: CheckoutOptions, refLogHeadSpec: string) =
+    io {
+      do! repo.Checkout (tree, None)
+
+      do! repo.Refs.MoveHeadTarget refLogHeadSpec
+    }
 
 /// <summary>
 /// Can be used to reference the <see cref="IRepository" /> from which
@@ -368,6 +441,7 @@ type Repository internal (repo: NodeGit.Repository) as this =
 
   let refs = ReferenceCollection this
   let tags = TagCollection this
+  let branches = BranchCollection this
   let commits = QueryableCommitLog this
   let index = Index this
 
@@ -386,6 +460,7 @@ type Repository internal (repo: NodeGit.Repository) as this =
 
   member __.Refs = refs
   member __.Tags = tags
+  member __.Branches = branches
   member __.Commits = commits
   member repo.Head =
     repo.Refs.Head
@@ -481,6 +556,15 @@ type Repository internal (repo: NodeGit.Repository) as this =
         return RepositoryStatus (r, options)
       }
     
+    member r.Checkout (tree: Tree, paths: string seq option) =
+      r.CheckoutTree (tree, Option.map List.ofSeq paths)
+    
+    member r.CheckoutTree (tree: Tree, paths: string list option) =
+      io {
+        let! nTree = tree.TreeInst
+        do! IO.ofPromiseFactory <| fun () -> NodeGit.nodegit.Checkout.tree r.Repo nTree
+      }
+    
   
   interface IDisposable with
     member __.Dispose () = repo.free ()
@@ -502,6 +586,12 @@ type Commit internal (repo: Repository, id: ObjectId) =
   member x.Message =
     x.Inst
     |> IO.map (fun c -> c.message ())
+  
+  member x.Tree =
+    io {
+      let! inst = x.Inst
+      return new Tree (repo, ObjectId (inst.treeId ()), None)
+    }
 
 type TagAnnotation internal (repo: Repository, id: ObjectId) =
   inherit LazyGitObject<NodeGit.Tag> (repo, id, safeLookup NodeGit.nodegit.Tag.lookup, (fun t -> t.free ()))
@@ -655,6 +745,12 @@ type Branch internal (repo: Repository, reference: Reference, canonicalNameSelec
   abstract Tip: IO<Commit option>
   default branch.Tip = branch.TargetObject
 
+  abstract IsRemote: bool
+  default branch.IsRemote =
+    match branch.CanonicalName with
+    | Reference.RemoteTrackingLikeBranchName _ -> true
+    | _ -> false
+
   abstract IsCurrentRepositoryHead: IO<bool>
   default branch.IsCurrentRepositoryHead =
     repo.Head
@@ -685,14 +781,14 @@ type QueryableCommitLog internal (repo: Repository, filter: ICommitFilter) =
     ioSeq {
       let revwalk = NodeGit.nodegit.Revwalk.create repo.Repo
       try
-        for inc in filter.IncludeReachableFrom do
+        for inc in IOSeq.coerce filter.IncludeReachableFrom do
           let! optId = repo.SingleCommittish inc
           match optId with
           | None -> ()
           | Some id -> 
             revwalk.push id.Oid
         
-        for inc in filter.ExcludeReachableFrom do
+        for inc in IOSeq.coerce filter.ExcludeReachableFrom do
           let! optId = repo.SingleCommittish inc
           match optId with
           | None -> ()
@@ -725,6 +821,35 @@ type ReferenceCollection internal (repo: Repository) =
 
   member refs.Head = refs.Get "HEAD"
 
+  member __.MoveHeadTarget (target: obj) =
+    io {
+      match target with
+      | :? ObjectId as oid ->
+        if repo.Repo.setHeadDetached oid.Oid <> 0
+        then failwithf "setHeadDetached failed"
+      
+      | :? DirectReference
+      | :? SymbolicReference ->
+        let ref = target :?> Reference
+        do! IO.ofPromiseFactory <| fun () -> repo.Repo.setHead ref.CanonicalName
+      
+      | :? string as targetIdentifier ->
+        match targetIdentifier with
+        | Reference.LocalLikeBranchName _ when (NodeGit.nodegit.Reference.isValidName targetIdentifier <> 0) ->
+          do! IO.ofPromiseFactory <| fun () -> repo.Repo.setHead targetIdentifier
+        
+        | _ ->
+          let! annotatedCommit = IO.ofPromiseFactory <| fun () -> NodeGit.nodegit.AnnotatedCommit.fromRevspec repo.Repo targetIdentifier
+          let annotatedCommit = Option.get annotatedCommit
+          try
+            if repo.Repo.setHeadDetachedFromAnnotated annotatedCommit <> 0
+            then failwithf "setHeadDetachedFromAnnotated failed"
+          finally
+            annotatedCommit.free ()
+      
+      | _ -> failwith "[MoveHeadTarget] Type not supported"
+    }
+
   member internal __.Resolve (name: string) =
     if isNull name then nullArg "name"
     elif String.IsNullOrEmpty name then invalidArg "name" "name cannot be empty"
@@ -752,10 +877,88 @@ type TagCollection internal (repo: Repository) =
     ioSeq {
       let! tagNames = IO.ofPromiseFactory (fun () -> NodeGit.nodegit.Tag.list repo.Repo)
 
-      for tagName in tagNames do
+      for tagName in IOSeq.coerce tagNames do
         let! tag = tags.Get tagName
         yield Option.get tag
     }
+
+type BranchCollection internal (repo: Repository) =
+  member branches.Get (name: string) : IO<Branch option> =
+    let buildFromReferenceName = branches.BuildFromReferenceName
+    io {
+      if BranchCollection.LooksLikeABranchName name 
+      then return! buildFromReferenceName name
+      else
+        let! branch = buildFromReferenceName (BranchCollection.ShortToLocalName name)
+        match branch with
+        | Some branch -> return Some branch
+        | None ->
+          let! branch = buildFromReferenceName (BranchCollection.ShortToRemoteName name)
+          match branch with
+          | Some branch -> return Some branch
+          | None ->
+            return! buildFromReferenceName (BranchCollection.ShortToRefName name)
+    }
+  
+  member branches.Add (name: string, committish: string) =
+    branches.Add (name, committish, false)
+  
+  member branches.Add (name: string, commit: Commit) =
+    branches.Add (name, commit, false)
+  
+  member branches.Add (name: string, committish: string, allowOverwrite: bool) =
+    io {
+      let! commit = repo.Lookup<Commit> (committish, typeof<Commit>)
+      return! branches.Add (name, Option.get commit, allowOverwrite)
+    }
+  
+  member branches.Add (name: string, commit: Commit, allowOverwrite: bool) =
+    let allowOverwrite =
+      if allowOverwrite
+      then 1
+      else 0
+
+    io {
+      let! annotated = IO.ofPromiseFactory <| fun () -> nodegit.AnnotatedCommit.lookup repo.Repo commit.Id.Oid
+      let annotated = Option.get annotated
+
+      try
+        let! _ = IO.ofPromiseFactory <| fun () -> nodegit.Branch.createFromAnnotated repo.Repo name annotated allowOverwrite
+        
+        return! branches.Get (BranchCollection.ShortToLocalName name)
+      finally
+        annotated.free ()
+    }
+  
+  static member internal ShortToLocalName name =
+    sprintf "%s%s" Reference.localBranchPrefix name
+  
+  static member internal ShortToRemoteName name =
+    sprintf "%s%s" Reference.remoteTrackingBranchPrefix name
+  
+  static member internal ShortToRefName name =
+    sprintf "%s%s" "refs/" name
+  
+  static member internal LooksLikeABranchName name =
+    match name with
+    | "HEAD"
+    | Reference.LocalLikeBranchName _
+    | Reference.RemoteTrackingLikeBranchName _ -> true
+    | _ -> false
+  
+  member private __.BuildFromReferenceName canonicalName =
+    io {
+      let! reference = repo.Refs.Resolve canonicalName
+      match reference with
+      | None -> return None
+      | Some reference ->
+        return Some <| Branch (repo, reference, canonicalName)
+    }
+
+type Tree internal (repo: Repository, id: ObjectId, path: string option) =
+  inherit LazyGitObject<NodeGit.Tree> (repo, id, safeLookup NodeGit.nodegit.Tree.lookup, fun t -> t.free ())
+
+  member internal x.TreeInst = base.Inst
 
 type Index internal (repo: Repository) =
   let _ref = new LazyGitRef<NodeGit.Index> (IO.ofPromiseFactory repo.Repo.index |> IO.map Some, ignore)
@@ -884,6 +1087,14 @@ module CommitOptions =
       allowEmptyCommit = false
       prettifyMessage = true
       commentaryChar = None }
+
+type CheckoutOptions =
+  { force: bool }
+
+module CheckoutOptions =
+
+  let defaultOptions =
+    { force = false }
 
 /// <summary>
 /// Flags controlling what files are reported by status.

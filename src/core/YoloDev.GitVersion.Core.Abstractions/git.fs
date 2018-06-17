@@ -52,7 +52,8 @@ type Hash =
 module Hash =
 
   let initial = Hash "INITIAL"
-  let string (Hash h) = h
+  let string (Hash h) = h.ToLowerInvariant ()
+  let string7 h = (string h).Substring (0, 7)
 
 type CommitFilter =
   private {
@@ -126,6 +127,10 @@ module Repo =
   
   let isDirty (Repo r) =
     r.IsDirty
+  
+  let createBranch n (Repo r) =
+    r.CreateBranch n
+    |> IO.bind r.Checkout
 
 [<RequireQualifiedAccess>]
 module Commit =

@@ -2,11 +2,14 @@ module YoloDev.GitVersion.NodeTest
 
 open YoloDev.GitVersion
 open YoloDev.GitVersion.Common
+open YoloDev.GitVersion.Core.Logging
 open YoloDev.GitVersion.Core.TestHelpers
 open Fable.Core
 open Fable.Import.Node
 open Fable.PowerPack
 open System
+
+let logger = Logger.create "YoloDev.GitVersion.NodeTest"
 
 module Helpers =
 
@@ -16,30 +19,32 @@ module Helpers =
   [<Emit("debugger")>]
   let debugger () : unit = jsNative
 
-  let readFile path =
-    Promise.create <| fun resolve reject ->
-      fs.readFile (path, "utf-8", fun err content ->
-        match err with
-        | None -> resolve content
-        | Some e -> reject (e :> obj :?> exn))
-  
-  let readAllLines =
-    readFile
-    >> Promise.map (fun s -> s.Split ([|'\n'|], StringSplitOptions.RemoveEmptyEntries))
-    >> Promise.map (Seq.map (fun s -> s.Trim ()))
-    >> Promise.map List.ofSeq
+let tryRun testCase =
+  io {
+    use! repo = Repo.createTestRepo ()
+    try 
+      do! TestCase.run repo testCase
+      return 0
+    with e ->
+      do! Logger.error logger (
+            eventX "Test case failed: {case}"
+            >> setField "case" testCase.name
+            >> addExn e)
+      return 1
+  }
 
-let main argv =
-  Helpers.readAllLines "cases/simple/01.case"
-  |> Promise.map (TestCase.parse "simple/01.case")
-  |> Promise.tap (string >> printfn "%s")
-  |> Promise.bind (fun test ->
-    Repo.createTestRepo ()
-    |> IO.bind (fun repo -> TestCase.run repo test)
-    |> IO.tap (fun _ -> printfn "!!! Done evaluating test")
-    |> IO.run)
+let mainIO _ =
+  Tests.discover "cases"
+  |> IOSeq.mapM tryRun
+  |> IO.map Seq.sum
 
-main (Globals.``process``.argv |> Seq.skip 2 |> List.ofSeq)
-|> Promise.tryStart (fun e ->
+let exitSuccess (n: int) =
+  Globals.``process``.exit n
+
+let exitError (e: exn) =
   printfn "Error: %s" (Helpers.errorStr e)
-  Globals.``process``.exit 1)
+  Globals.``process``.exit 1
+
+mainIO (Globals.``process``.argv |> Seq.skip 2 |> List.ofSeq)
+|> IO.run
+|> Promise.eitherEnd exitSuccess exitError

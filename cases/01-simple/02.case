@@ -1,0 +1,12 @@
+#simple
+expect 0.1.0-ci.0
+commit
+expect 0.1.0-ci.1
+commit
+expect 0.1.0-ci.2
+release
+expect 0.1.0
+create-branch "feat/some-feat"
+expect 0.1.0
+commit
+expect 0.1.1-some-feat.1+SHA7

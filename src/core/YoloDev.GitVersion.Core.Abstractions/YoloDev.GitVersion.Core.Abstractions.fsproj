@@ -9,6 +9,7 @@
     <Compile Include="builders.fs" />
     <Compile Include="logging.fs" />
     <Compile Include="env.fs" />
+    <Compile Include="fs.fs" />
     <Compile Include="git.fs" />
   </ItemGroup>
   <Import Project="..\..\..\.paket\Paket.Restore.targets" />

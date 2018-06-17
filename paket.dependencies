@@ -10,5 +10,5 @@ nuget Fable.Import.Node
 nuget Fable.PowerPack
 nuget LibGit2Sharp
 nuget Hopac
-nuget Logary >= 5.0.0-beta.11
-nuget Logary.Adapters.Facade >= 5.0.0-beta.11
+nuget Logary >= 5.0.0-beta.18
+nuget Logary.Adapters.Facade >= 5.0.0-beta.18

@@ -54,35 +54,68 @@ module private Parsing =
 type TestStep =
   | Expect of version: Semver
   | Commit of message: string
+  | CreateBranch of branch: string
   | Release
 
   override step.ToString () =
     match step with
-    | Expect v -> sprintf "Expect %s" (string v)
-    | Commit m -> sprintf "Commit %s" (string m)
-    | Release  -> sprintf "Release"
+    | Expect v       -> sprintf "Expect %s" (string v)
+    | Commit m       -> sprintf "Commit %s" m
+    | CreateBranch b -> sprintf "Create branch %s" b
+    | Release        -> sprintf "Release"
 
 [<RequireQualifiedAccess>]
 module TestStep =
 
+  let private replaceTokens (v: Semver) (repo: Repo) =
+    let chooseM f l =
+      IOSeq.ofSeq l
+      |> IOSeq.chooseM f
+      |> IO.map List.ofSeq
+
+    let replaceToken =
+      function
+      | Str "SHA7" -> io {
+        let! head = Repo.head repo
+        let! commit = Branch.tip head
+        match commit with
+        | None -> return Some (Str "EMPTY")
+        | Some commit ->
+          let! hash = Commit.hash commit
+          return Some (Str (Hash.string7 hash)) }
+      
+      | segment -> IO.unit (Some segment)
+
+    io {
+      let! pre = chooseM replaceToken v.pre
+      let! build = chooseM replaceToken v.build
+      return { v with pre = pre; build = build }
+    }
+
   let parse name index =
     tokens >> function
-      | ["expect"; Semver v] -> Expect v
-      | ["commit"]           -> Commit (sprintf "Commit for line %d" index)
-      | ["commit"; msg]      -> Commit (sprintf "Commit for line %d\n\n%s" index msg)
-      | ["release"]          -> Release
-      | tokens               -> failwithf "Unknown tokens in file %s: %A" name tokens
+      | ["expect"; Semver v]    -> Expect v
+      | ["commit"]              -> Commit (sprintf "Commit for line %d" index)
+      | ["commit"; msg]         -> Commit (sprintf "Commit for line %d\n\n%s" index msg)
+      | ["create-branch"; name] -> CreateBranch name
+      | ["release"]             -> Release
+      | tokens                  -> failwithf "Unknown tokens in file %s: %A" name tokens
   
   let evaluate repo name index =
     function
     | Expect expected ->
-      YoloDev.GitVersion.SingleRepo.Version.currentVersion repo
-      |> IO.map (fun actual ->
+      io {
+        let! expected = replaceTokens expected repo
+        let! actual = YoloDev.GitVersion.SingleRepo.Version.currentVersion repo
         if expected <> actual then
-          failwithf "Step %d at %s: Expected %A to be %A" index name actual expected)
+          failwithf "Step %d at %s: Expected %A to be %A" index name actual expected
+      }
     
     | Commit m ->
       IO.combine (Repo.commit m repo) IO.zero
+    
+    | CreateBranch b ->
+      IO.combine (Repo.createBranch b repo) IO.zero
     
     | Release ->
       YoloDev.GitVersion.SingleRepo.Version.newReleaseVersion repo
@@ -130,7 +163,6 @@ module TestCase =
         do! Logger.info logger (
               eventX "Evaluate {step}"
               >> setField "step" step)
-        debugger ()
         
         do! TestStep.evaluate repo case.name index step
         do! Logger.info logger (
@@ -141,3 +173,29 @@ module TestCase =
             eventX "Done running test case {case}"
             >> setField "case" case.name)
     }
+
+[<RequireQualifiedAccess>]
+module Tests =
+  let rec private findFiles dir path =
+    ioSeq {
+      let! dir = Fs.getDir dir
+      for entry in Dir.entries dir do
+        if Entry.isDir entry then yield! findFiles (Entry.path entry) (Entry.name entry :: path)
+        elif Entry.isFile entry then yield (path, File.ofEntry entry)
+    }
+  
+  let private parse (path, file) =
+    io {
+      let! content = File.read file
+      let lines = 
+        content.Split ([|'\n'|], StringSplitOptions.RemoveEmptyEntries)
+        |> Seq.map (fun s -> s.Trim ())
+        |> List.ofSeq
+      
+      let name = String.concat "/" (List.rev (Entry.name file :: path))
+      return TestCase.parse name lines
+    }
+  
+  let discover dir =
+    findFiles dir []
+    |> IOSeq.mapM parse

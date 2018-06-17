@@ -2,6 +2,8 @@ module internal YoloDev.GitVersion.Core.Node.Types
 
 open Fable.Core
 open Fable.Core.JsInterop
+open Fable.Import.Node
+open Fable.PowerPack
 open Bindings.Winston
 open System
 open YoloDev.GitVersion.Core.Node.Shim
@@ -53,6 +55,8 @@ module TagWrapper =
 
 type BranchWrapper (branch: Branch) =
 
+  member internal __.Branch = branch
+
   interface IBranch with
     member __.Name = IO.unit branch.FriendlyName
     member __.Tip = 
@@ -61,6 +65,11 @@ type BranchWrapper (branch: Branch) =
   
   interface IDisposable with
     member __.Dispose () = ()
+
+[<RequireQualifiedAccess>]
+module BranchWrapper =
+
+  let ofBranch branch = new BranchWrapper (branch) :> IBranch
 
 type CommitLogWrapper (repo: Repository, commitLog: QueryableCommitLog) =
 
@@ -125,6 +134,23 @@ type RepositoryWrapper (repo: Repository, dispose: (unit -> unit) option) =
 
         return! status.IsDirty
       }
+    
+    member __.CreateBranch name =
+      io {
+        debugger ()
+        let! branch = repo.CreateBranch name
+
+        debugger ()
+        return BranchWrapper.ofBranch (Option.get branch)
+      }
+    
+    member __.Checkout branch =
+      let branch =
+        match branch with
+        | :? BranchWrapper as b -> b.Branch
+        | _ -> failwithf "Invalid branch type used"
+      Commands.Checkout (repo, branch)
+      |> IO.map ignore
 
   interface IDisposable with
     member __.Dispose () = 
@@ -227,3 +253,60 @@ type LoggerWrapper (logger: Bindings.Winston.Logger, name: string) =
     member __.LogError f = logMessage "error" f
     member __.LogFatal f = logMessage "fatal" f
 
+type FsEntryWrapper (stat: Fs.Stats, inPath: string) =
+  let p = path.normalize inPath
+
+  let entries =
+    let paths =
+      IOSeq.ofSeqPromiseFactory <| fun () ->
+        Promise.create <| fun res rej ->
+          fs.readdir (U2.Case1 p, fun err entries ->
+            match err with
+            | None -> res (entries |> Seq.map (fun e -> path.resolve [| p; e |]))
+            | Some e -> rej (e :?> exn))
+    
+    paths
+    |> IOSeq.mapM FsEntryWrapper.Lookup
+
+  static member Lookup p =
+    let stat =
+      IO.ofPromiseFactory <| fun () ->
+        Promise.create <| fun res rej ->
+          fs.stat (U2.Case1 p, fun err stat ->
+            match err with
+            | None -> res stat
+            | Some e -> rej (e :?> exn)
+            Globals.undefined)
+    
+    stat
+    |> IO.map (fun stat -> FsEntryWrapper (stat, p))
+
+  interface IFileSystemEntry with
+    member __.Path = p
+    member __.Name = path.basename p
+    member __.IsDirectory = stat.isDirectory ()
+    member __.IsFile = stat.isFile ()
+  
+  interface IFile with
+    member __.Read () =
+      IO.ofPromiseFactory <| fun () ->
+        Promise.create <| fun res rej ->
+          fs.readFile (p, "utf8", fun err content ->
+            match err with
+            | None -> res content
+            | Some e -> rej (e :?> exn))
+
+  interface IDirectory with
+    member __.Entries =
+      entries
+      |> IOSeq.map (fun e -> e :> IFileSystemEntry)
+    
+    member __.Dirs =
+      entries
+      |> IOSeq.filter (fun e -> (e :> IFileSystemEntry).IsDirectory)
+      |> IOSeq.map (fun e -> e :> IDirectory)
+    
+    member __.Files =
+      entries
+      |> IOSeq.filter (fun e -> (e :> IFileSystemEntry).IsFile)
+      |> IOSeq.map (fun e -> e :> IFile)

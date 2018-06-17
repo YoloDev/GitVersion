@@ -9,6 +9,7 @@
     "rollup-plugin-prettier": "^0.4.0"
   },
   "dependencies": {
+    "chalk": "^2.4.1",
     "nodegit": "^0.22.1",
     "winston": "^3.0.0"
   }

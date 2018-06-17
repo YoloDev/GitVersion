@@ -7,6 +7,7 @@
     <None Include="paket.references" />
     <Compile Include="bindings/nodegit.fs" />
     <Compile Include="bindings/winston.fs" />
+    <Compile Include="bindings/chalk.fs" />
     <Compile Include="shim.fs" />
     <Compile Include="types.fs" />
     <Compile Include="run.fs" />

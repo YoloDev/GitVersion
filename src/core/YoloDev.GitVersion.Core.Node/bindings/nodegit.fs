@@ -81,6 +81,12 @@ type GitObjectStatic =
   [<Emit("$0.lookup($1,$2,$3)")>]
   abstract lookupS: Repository -> string -> ObjectType -> Promise<GitObject>
 
+type Tree =
+  abstract free: unit -> unit
+
+type TreeStatic =
+  abstract lookup: Repository -> Oid -> Promise<Tree>
+
 [<AllowNullLiteral>]
 type Reference =
   abstract isBranch: unit -> int
@@ -99,6 +105,7 @@ type ReferenceStatic =
   abstract lookup: Repository -> Oid -> Promise<Reference>
   [<Emit("$0.lookup($1,$2)")>]
   abstract lookupS: Repository -> string -> Promise<Reference>  
+  abstract isValidName: string -> int
 
 type Tag =
   inherit GitObject
@@ -117,6 +124,7 @@ type Signature =
 
 type BranchStatic =
   abstract name: Reference -> string
+  abstract createFromAnnotated: Repository -> string -> AnnotatedCommit -> int -> Promise<Reference option>
 
 type SignatureStatic =
   abstract now: string -> string -> Signature
@@ -126,11 +134,19 @@ type Commit =
   inherit GitObject
   abstract message: unit -> string
   abstract sha: unit -> string
+  abstract treeId: unit -> Oid
 
 type CommitStatic =
   abstract lookup: Repository -> Oid -> Promise<Commit>
   [<Emit("$0.lookup($1,$2)")>]
   abstract lookupS: Repository -> string -> Promise<Commit>
+
+type AnnotatedCommit =
+  abstract free: unit -> unit
+
+type AnnotatedCommitStatic =
+  abstract lookup: Repository -> Oid -> Promise<AnnotatedCommit option>
+  abstract fromRevspec: Repository -> string -> Promise<AnnotatedCommit option>
 
 type Revwalk =
   abstract free: unit -> unit
@@ -153,6 +169,9 @@ type Repository =
   abstract createCommitOnHead: string array -> Signature -> Signature -> string -> Promise<Oid>
   abstract getTagByName: string -> Promise<Tag>
   abstract index: unit -> Promise<Index>
+  abstract setHeadDetached: Oid -> int
+  abstract setHeadDetachedFromAnnotated: AnnotatedCommit -> int
+  abstract setHead: string -> Promise<unit>
 
 type RepositoryStatic =
   abstract ``open``: string -> Promise<Repository>
@@ -201,6 +220,9 @@ type StatusEntry =
 type StatusStatic =
   abstract byIndex: StatusList -> int -> StatusEntry
 
+type CheckoutStatic =
+  abstract tree: Repository -> Tree -> Promise<unit>
+
 type IExports =
   abstract Oid: OidStatic
   abstract Signature: SignatureStatic
@@ -215,6 +237,9 @@ type IExports =
   abstract StatusOptions: StatusOptionsStatic
   abstract StatusList: StatusListStatic
   abstract Status: StatusStatic
+  abstract AnnotatedCommit: AnnotatedCommitStatic
+  abstract Tree: TreeStatic
+  abstract Checkout: CheckoutStatic
 
 [<Import("*", "nodegit")>]
 let nodegit: IExports = Exceptions.jsNative
